@@ -1,0 +1,95 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  STAFF
+}
+
+enum PricingType {
+  SAATLIK
+  SABIT
+  PAKET
+}
+
+enum PaymentStatus {
+  BEKLIYOR
+  ODENDI
+}
+
+enum PaymentMethod {
+  NAKIT
+  KART
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  fullName     String
+  username     String   @unique
+  passwordHash String
+  role         Role     @default(STAFF)
+  createdAt    DateTime @default(now())
+
+  visits Visit[]
+}
+
+model Guardian {
+  id        Int      @id @default(autoincrement())
+  fullName  String
+  phone     String
+  note      String?
+  createdAt DateTime @default(now())
+
+  children Child[]
+  visits   Visit[]
+}
+
+model Child {
+  id         Int       @id @default(autoincrement())
+  fullName   String
+  birthDate  DateTime?
+  note       String?
+  createdAt  DateTime  @default(now())
+  guardianId Int
+  guardian   Guardian  @relation(fields: [guardianId], references: [id], onDelete: Cascade)
+
+  visits Visit[]
+}
+
+model PricingPlan {
+  id          Int         @id @default(autoincrement())
+  name        String
+  type        PricingType @default(SAATLIK)
+  price       Float
+  unitMinutes Int         @default(60)
+  active      Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+
+  visits Visit[]
+}
+
+model Visit {
+  id            Int            @id @default(autoincrement())
+  childId       Int
+  child         Child          @relation(fields: [childId], references: [id])
+  guardianId    Int
+  guardian      Guardian       @relation(fields: [guardianId], references: [id])
+  pricingPlanId Int
+  pricingPlan   PricingPlan    @relation(fields: [pricingPlanId], references: [id])
+  wristbandNo   String
+  checkInAt     DateTime       @default(now())
+  checkOutAt    DateTime?
+  durationMin   Int?
+  amount        Float?
+  paymentStatus PaymentStatus  @default(BEKLIYOR)
+  paymentMethod PaymentMethod?
+  staffId       Int?
+  staff         User?          @relation(fields: [staffId], references: [id])
+  createdAt     DateTime       @default(now())
+}
