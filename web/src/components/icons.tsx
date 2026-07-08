@@ -29,7 +29,21 @@ export type IconName =
   | "sliders"
   | "lock"
   | "doc"
-  | "chevronRight";
+  | "chevronRight"
+  | "tag"
+  | "trash"
+  | "image"
+  | "pencil"
+  | "check"
+  | "close"
+  | "refresh"
+  | "drag"
+  | "tv"
+  | "more"
+  | "bolt"
+  | "play"
+  | "warn"
+  | "coffee";
 
 export function Icon({ name, className = "h-5 w-5" }: { name: IconName; className?: string }) {
   const p = {
@@ -258,6 +272,105 @@ export function Icon({ name, className = "h-5 w-5" }: { name: IconName; classNam
       return (
         <svg {...p}>
           <path d="m9 6 6 6-6 6" />
+        </svg>
+      );
+    case "tag":
+      return (
+        <svg {...p}>
+          <path d="M20.6 13.4 12 22l-9-9V4a1 1 0 0 1 1-1h9l7.6 7.6a2 2 0 0 1 0 2.8Z" />
+          <circle cx="7.5" cy="7.5" r="1.3" />
+        </svg>
+      );
+    case "trash":
+      return (
+        <svg {...p}>
+          <path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13" />
+        </svg>
+      );
+    case "image":
+      return (
+        <svg {...p}>
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <circle cx="8.5" cy="9.5" r="1.5" />
+          <path d="m4 18 5-5 4 4 3-3 4 4" />
+        </svg>
+      );
+    case "pencil":
+      return (
+        <svg {...p}>
+          <path d="M12 20h9" />
+          <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+        </svg>
+      );
+    case "check":
+      return (
+        <svg {...p}>
+          <path d="M20 6 9 17l-5-5" />
+        </svg>
+      );
+    case "close":
+      return (
+        <svg {...p}>
+          <path d="M18 6 6 18M6 6l12 12" />
+        </svg>
+      );
+    case "refresh":
+      return (
+        <svg {...p}>
+          <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
+          <path d="M21 3v5h-5" />
+        </svg>
+      );
+    case "drag":
+      return (
+        <svg {...p} fill="currentColor" stroke="none">
+          <circle cx="9" cy="6" r="1.4" />
+          <circle cx="15" cy="6" r="1.4" />
+          <circle cx="9" cy="12" r="1.4" />
+          <circle cx="15" cy="12" r="1.4" />
+          <circle cx="9" cy="18" r="1.4" />
+          <circle cx="15" cy="18" r="1.4" />
+        </svg>
+      );
+    case "tv":
+      return (
+        <svg {...p}>
+          <rect x="2" y="7" width="20" height="13" rx="2" />
+          <path d="m7 4 5 3 5-3" />
+        </svg>
+      );
+    case "more":
+      return (
+        <svg {...p} fill="currentColor" stroke="none">
+          <circle cx="12" cy="5" r="1.6" />
+          <circle cx="12" cy="12" r="1.6" />
+          <circle cx="12" cy="19" r="1.6" />
+        </svg>
+      );
+    case "bolt":
+      return (
+        <svg {...p}>
+          <path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z" />
+        </svg>
+      );
+    case "play":
+      return (
+        <svg {...p} fill="currentColor" stroke="none">
+          <path d="M7 5v14l11-7z" />
+        </svg>
+      );
+    case "warn":
+      return (
+        <svg {...p}>
+          <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" />
+          <path d="M12 9v4M12 17h.01" />
+        </svg>
+      );
+    case "coffee":
+      return (
+        <svg {...p}>
+          <path d="M6 8h12v6a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V8Z" />
+          <path d="M18 10h1a3 3 0 0 1 0 6h-1M6 4v2M10 4v2M14 4v2" />
         </svg>
       );
   }

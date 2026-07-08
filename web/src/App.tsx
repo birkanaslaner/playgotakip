@@ -15,6 +15,9 @@ import Messages from "./pages/Messages";
 import Iys from "./pages/Iys";
 import TableOrder from "./pages/TableOrder";
 import TimeTrackingSettings from "./pages/settings/TimeTracking";
+import ProductsSettings from "./pages/settings/Products";
+import Preferences from "./pages/settings/Preferences";
+import Subscription from "./pages/settings/Subscription";
 
 function Protected({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
@@ -87,22 +90,13 @@ export default function App() {
       <Route path="/ayarlar" element={<P><SettingsLayout /></P>}>
         <Route index element={<Navigate to="/ayarlar/sure-takip" replace />} />
         <Route path="sure-takip" element={<TimeTrackingSettings />} />
-        <Route
-          path="abonelik"
-          element={<ComingSoon title="Abonelik" description="Plan, fatura ve odeme ayarlari. Yakinda aktif olacak." />}
-        />
-        <Route
-          path="urunler"
-          element={<ComingSoon title="Ürünler" description="Kafe urunleri ve stok yonetimi. Yakinda aktif olacak." />}
-        />
+        <Route path="abonelik" element={<Subscription />} />
+        <Route path="urunler" element={<ProductsSettings />} />
         <Route
           path="dil-bolge"
           element={<ComingSoon title="Dil ve Bölge" description="Para birimi ve saat dilimi ayarlari. Yakinda aktif olacak." />}
         />
-        <Route
-          path="tercihler"
-          element={<ComingSoon title="Uygulama Tercihleri" description="Uyelik ve davranis tercihleri. Yakinda aktif olacak." />}
-        />
+        <Route path="tercihler" element={<Preferences />} />
         <Route
           path="bildirimler"
           element={<ComingSoon title="Bildirimler" description="E-posta ve push bildirim tercihleri. Yakinda aktif olacak." />}

@@ -28,6 +28,12 @@ enum PaymentMethod {
   KART
 }
 
+enum TableStatus {
+  UYGUN
+  DOLU
+  PASIF
+}
+
 model User {
   id           Int      @id @default(autoincrement())
   fullName     String
@@ -63,15 +69,75 @@ model Child {
 }
 
 model PricingPlan {
-  id          Int         @id @default(autoincrement())
-  name        String
-  type        PricingType @default(SAATLIK)
-  price       Float
-  unitMinutes Int         @default(60)
-  active      Boolean     @default(true)
-  createdAt   DateTime    @default(now())
+  id           Int         @id @default(autoincrement())
+  name         String
+  type         PricingType @default(SAATLIK)
+  price        Float
+  unitMinutes  Int         @default(60)
+  playArea     String?
+  label        String?
+  weekdayPrice Float?
+  weekendPrice Float?
+  carryOver    Boolean     @default(false)
+  loyalty      Boolean     @default(false)
+  active       Boolean     @default(true)
+  createdAt    DateTime    @default(now())
 
   visits Visit[]
+}
+
+model Category {
+  id          Int       @id @default(autoincrement())
+  name        String
+  description String?
+  sortOrder   Int       @default(0)
+  createdAt   DateTime  @default(now())
+  products    Product[]
+}
+
+model Setting {
+  key   String @id
+  value String
+}
+
+model PlayArea {
+  id        Int      @id @default(autoincrement())
+  name      String
+  createdAt DateTime @default(now())
+}
+
+model Product {
+  id            Int       @id @default(autoincrement())
+  name          String
+  price         Float     @default(0)
+  stock         Int       @default(0)
+  vatRate       Int       @default(10)
+  image         String?
+  active        Boolean   @default(true)
+  showInQrMenu  Boolean   @default(true)
+  qrDescription String?
+  tags          String?
+  categoryId    Int?
+  category      Category? @relation(fields: [categoryId], references: [id])
+  createdAt     DateTime  @default(now())
+}
+
+model CafeTable {
+  id        Int         @id @default(autoincrement())
+  name      String      @unique
+  status    TableStatus @default(UYGUN)
+  sortOrder Int         @default(0)
+  createdAt DateTime    @default(now())
+  tabs      TableTab[]
+}
+
+model TableTab {
+  id        Int       @id @default(autoincrement())
+  tableId   Int
+  table     CafeTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  total     Float     @default(0)
+  openedAt  DateTime  @default(now())
+  closedAt  DateTime?
 }
 
 model Visit {
@@ -82,11 +148,18 @@ model Visit {
   guardian      Guardian       @relation(fields: [guardianId], references: [id])
   pricingPlanId Int
   pricingPlan   PricingPlan    @relation(fields: [pricingPlanId], references: [id])
-  wristbandNo   String
-  checkInAt     DateTime       @default(now())
-  checkOutAt    DateTime?
-  durationMin   Int?
-  amount        Float?
+  wristbandNo     String
+  checkInAt       DateTime       @default(now())
+  checkOutAt      DateTime?
+  durationMin     Int?
+  discount        Float          @default(0)
+  extraMinutes    Int            @default(0)
+  extraCharge     Float          @default(0)
+  pausedAt        DateTime?
+  pausedMs        Int            @default(0)
+  membershipMonths Int?
+  membershipEndAt DateTime?
+  amount          Float?
   paymentStatus PaymentStatus  @default(BEKLIYOR)
   paymentMethod PaymentMethod?
   staffId       Int?

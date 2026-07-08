@@ -1,13 +1,18 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
-import type { Guardian, Visit } from "../api/types";
+import type { Visit } from "../api/types";
 import { Icon } from "../components/icons";
-import { formatCurrency, formatDuration, formatTime } from "../utils/format";
+import PlayAreaDonut, { withPlayAreaColors } from "../components/PlayAreaDonut";
+import { formatCurrency, formatDuration } from "../utils/format";
 
 interface Occupancy {
   activeCount: number;
   visits: Visit[];
+}
+interface PlayAreaDistribution {
+  totalVisits: number;
+  areas: { area: string; count: number }[];
 }
 interface Daily {
   visitCount: number;
@@ -15,6 +20,27 @@ interface Daily {
   cash: number;
   card: number;
   visits: Visit[];
+}
+
+function visitEndMs(v: Visit): number {
+  const t = new Date(v.checkInAt).getTime();
+  const mins = (v.pricingPlan?.unitMinutes ?? 0) + (v.extraMinutes ?? 0);
+  return t + mins * 60000 + (v.pausedMs ?? 0);
+}
+
+function formatRemainingMs(ms: number): string {
+  if (ms <= 0) return "Süre doldu";
+  const totalSec = Math.floor(ms / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}dk ${s}sn`;
+}
+
+function remainingAtCheckout(v: Visit): string {
+  if (!v.checkOutAt) return "-";
+  const end = visitEndMs(v);
+  const out = new Date(v.checkOutAt).getTime();
+  return formatRemainingMs(end - out);
 }
 
 function isToday(iso?: string | null) {
@@ -41,15 +67,28 @@ export default function Dashboard() {
     queryFn: async () => (await api.get<Daily>("/reports/daily")).data,
     refetchInterval: 60000,
   });
+  const playAreaDistribution = useQuery({
+    queryKey: ["play-area-distribution"],
+    queryFn: async () =>
+      (await api.get<PlayAreaDistribution>("/reports/play-area-distribution")).data,
+    refetchInterval: 30000,
+  });
+  const totalPlayTime = useQuery({
+    queryKey: ["total-play-time"],
+    queryFn: async () => (await api.get<{ totalMinutes: number }>("/reports/total-play-time")).data,
+    refetchInterval: 60000,
+  });
   const guardians = useQuery({
     queryKey: ["guardians", "dashboard"],
-    queryFn: async () => (await api.get<Guardian[]>("/guardians")).data,
+    queryFn: async () => (await api.get<{ createdAt?: string }[]>("/guardians")).data,
   });
+
+  const deliveredVisits = daily.data?.visits ?? [];
+  const playAreaSegments = withPlayAreaColors(playAreaDistribution.data?.areas ?? []);
 
   const activeCount = occupancy.data?.activeCount ?? 0;
   const totalRevenue = daily.data?.totalRevenue ?? 0;
-  const totalPlayMinutes =
-    daily.data?.visits.reduce((sum, v) => sum + (v.durationMin ?? 0), 0) ?? 0;
+  const totalPlayMinutes = totalPlayTime.data?.totalMinutes ?? 0;
   const newGuardians = guardians.data?.filter((g) => isToday(g.createdAt)).length ?? 0;
 
   return (
@@ -83,7 +122,7 @@ export default function Dashboard() {
           </div>
           <div className="mt-3 flex items-center justify-between">
             <span className="text-sm text-slate-500">Toplam Oyun Süresi</span>
-            <span className="text-xs text-slate-400">bugün şimdiye kadar</span>
+            <span className="text-xs text-slate-400">bugüne kadar</span>
           </div>
         </div>
 
@@ -133,46 +172,54 @@ export default function Dashboard() {
         </div>
 
         <div className="card">
-          <h2 className="mb-4 font-semibold text-slate-800">Oyun Alanı Dağılımı</h2>
-          <div className="flex h-52 items-center justify-center text-sm text-slate-400">
-            Bugün veri yok
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="font-semibold text-slate-800">Oyun Alanı Dağılımı</h2>
+            <span className="text-xs text-slate-400">Bugüne kadar</span>
           </div>
+          <PlayAreaDonut segments={playAreaSegments} />
         </div>
       </div>
 
-      {/* Alt satir: aktif oyun sureleri tablosu */}
+      {/* Alt satir: teslim edilmis cocuklar */}
       <div className="card">
         <h2 className="mb-4 font-semibold text-slate-800">Aktif Oyun Süreleri</h2>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-100 text-left text-xs uppercase tracking-wide text-slate-400">
-                <th className="pb-2 pr-4 font-medium">Çocuk / Veli</th>
-                <th className="pb-2 pr-4 font-medium">Oyun Alanı</th>
-                <th className="pb-2 pr-4 font-medium">Giriş Saati</th>
-              </tr>
-            </thead>
-            <tbody>
-              {occupancy.data && occupancy.data.visits.length > 0 ? (
-                occupancy.data.visits.map((v) => (
-                  <tr key={v.id} className="border-b border-slate-50 last:border-0">
-                    <td className="py-3 pr-4">
-                      <div className="font-medium text-slate-800">{v.child?.fullName}</div>
-                      <div className="text-xs text-slate-400">{v.guardian?.fullName}</div>
-                    </td>
-                    <td className="py-3 pr-4 text-slate-600">{v.pricingPlan?.name ?? "-"}</td>
-                    <td className="py-3 pr-4 text-slate-600">{formatTime(v.checkInAt)}</td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={3} className="py-10 text-center text-sm text-slate-400">
-                    İçeride kimse bulunmuyor.
-                  </td>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-100 text-left text-xs uppercase tracking-wide text-slate-400">
+                  <th className="pb-2 pr-4 font-medium">Veli Adı</th>
+                  <th className="pb-2 pr-4 font-medium">Çocuk Adı</th>
+                  <th className="pb-2 pr-4 font-medium">Oyun Alanı</th>
+                  <th className="pb-2 pr-4 font-medium">Telefon</th>
+                  <th className="pb-2 pr-4 font-medium">Kalan Süre</th>
                 </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {deliveredVisits.length > 0 ? (
+                  deliveredVisits.map((v) => (
+                    <tr key={v.id} className="border-b border-slate-50 last:border-0">
+                      <td className="py-3 pr-4 text-slate-600">{v.guardian?.fullName ?? "-"}</td>
+                      <td className="py-3 pr-4 font-semibold text-slate-800">
+                        {v.child?.fullName ?? "-"}
+                      </td>
+                      <td className="py-3 pr-4 text-slate-600">
+                        {v.pricingPlan?.playArea ?? v.pricingPlan?.name ?? "-"}
+                      </td>
+                      <td className="py-3 pr-4 text-slate-500">{v.guardian?.phone ?? "-"}</td>
+                      <td className="py-3 pr-4 font-medium text-slate-700">
+                        {remainingAtCheckout(v)}
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={5} className="py-8 text-center text-sm text-slate-400">
+                      Bugün teslim edilmiş kayıt bulunmuyor.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
         </div>
       </div>
     </div>

@@ -7,13 +7,43 @@ import { authRequired } from "../middleware/auth";
 export const pricingPlansRouter = Router();
 pricingPlansRouter.use(authRequired);
 
+const typeLabels: Record<string, string> = {
+  SAATLIK: "Saatlik",
+  SABIT: "Sabit Paket",
+  PAKET: "Paket",
+};
+
 const planSchema = z.object({
-  name: z.string().min(1, "Tarife adi gerekli"),
-  type: z.enum(["SAATLIK", "SABIT", "PAKET"]).default("SAATLIK"),
-  price: z.coerce.number().nonnegative(),
-  unitMinutes: z.coerce.number().int().positive().default(60),
+  type: z.enum(["SAATLIK", "SABIT", "PAKET"]).default("SABIT"),
+  playArea: z.string().optional().nullable(),
+  label: z.string().optional().nullable(),
+  unitMinutes: z.coerce.number().int().positive().default(30),
+  weekdayPrice: z.coerce.number().nonnegative(),
+  weekendPrice: z.coerce.number().nonnegative().optional(),
+  carryOver: z.boolean().optional().default(false),
+  loyalty: z.boolean().optional().default(false),
   active: z.boolean().optional(),
 });
+
+type PlanInput = z.infer<typeof planSchema>;
+
+function buildData(data: PlanInput) {
+  const label = data.label?.trim() || null;
+  const name = label || `${typeLabels[data.type]} ${data.unitMinutes} dk`;
+  return {
+    name,
+    label,
+    type: data.type,
+    playArea: data.playArea?.trim() || null,
+    unitMinutes: data.unitMinutes,
+    price: data.weekdayPrice,
+    weekdayPrice: data.weekdayPrice,
+    weekendPrice: data.weekendPrice ?? data.weekdayPrice,
+    carryOver: data.carryOver,
+    loyalty: data.loyalty,
+    ...(data.active !== undefined ? { active: data.active } : {}),
+  };
+}
 
 pricingPlansRouter.get(
   "/",
@@ -31,7 +61,7 @@ pricingPlansRouter.post(
   "/",
   asyncHandler(async (req, res) => {
     const data = planSchema.parse(req.body);
-    const plan = await prisma.pricingPlan.create({ data });
+    const plan = await prisma.pricingPlan.create({ data: buildData(data) });
     res.status(201).json(plan);
   })
 );
@@ -42,7 +72,7 @@ pricingPlansRouter.put(
     const data = planSchema.parse(req.body);
     const plan = await prisma.pricingPlan.update({
       where: { id: Number(req.params.id) },
-      data,
+      data: buildData(data),
     });
     res.json(plan);
   })

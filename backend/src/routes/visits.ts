@@ -20,6 +20,10 @@ const checkInSchema = z.object({
   guardianId: z.coerce.number().int().positive(),
   pricingPlanId: z.coerce.number().int().positive(),
   wristbandNo: z.string().min(1, "Bileklik numarasi gerekli"),
+  discount: z.coerce.number().nonnegative().optional().default(0),
+  paymentMethod: z.enum(["NAKIT", "KART"]).optional(),
+  membershipMonths: z.coerce.number().int().positive().optional(),
+  membershipEndAt: z.coerce.date().optional(),
 });
 
 const checkOutSchema = z.object({
@@ -78,11 +82,71 @@ visitsRouter.post(
         guardianId: data.guardianId,
         pricingPlanId: data.pricingPlanId,
         wristbandNo: data.wristbandNo,
+        discount: data.discount,
+        paymentMethod: data.paymentMethod,
+        membershipMonths: data.membershipMonths,
+        membershipEndAt: data.membershipEndAt,
         staffId: req.user!.id,
       },
       include: includeRefs,
     });
     res.status(201).json(visit);
+  })
+);
+
+const extendSchema = z.object({
+  minutes: z.coerce.number().int().positive(),
+  fee: z.coerce.number().nonnegative().optional().default(0),
+});
+
+// Sureyi uzat (ek dakika + ek ucret ekle)
+visitsRouter.post(
+  "/:id/extend",
+  asyncHandler(async (req, res) => {
+    const { minutes, fee } = extendSchema.parse(req.body);
+    const existing = await prisma.visit.findUnique({ where: { id: Number(req.params.id) } });
+    if (!existing) return res.status(404).json({ error: "Ziyaret bulunamadi" });
+    if (existing.checkOutAt) return res.status(400).json({ error: "Ziyaret zaten kapatilmis" });
+    const visit = await prisma.visit.update({
+      where: { id: existing.id },
+      data: {
+        extraMinutes: existing.extraMinutes + minutes,
+        extraCharge: existing.extraCharge + fee,
+      },
+      include: includeRefs,
+    });
+    res.json(visit);
+  })
+);
+
+// Sayaci duraklat / devam ettir
+visitsRouter.post(
+  "/:id/toggle-pause",
+  asyncHandler(async (req, res) => {
+    const existing = await prisma.visit.findUnique({ where: { id: Number(req.params.id) } });
+    if (!existing) return res.status(404).json({ error: "Ziyaret bulunamadi" });
+    if (existing.checkOutAt) return res.status(400).json({ error: "Ziyaret zaten kapatilmis" });
+    const now = new Date();
+    const data = existing.pausedAt
+      ? { pausedAt: null, pausedMs: existing.pausedMs + (now.getTime() - existing.pausedAt.getTime()) }
+      : { pausedAt: now };
+    const visit = await prisma.visit.update({
+      where: { id: existing.id },
+      data,
+      include: includeRefs,
+    });
+    res.json(visit);
+  })
+);
+
+// Ziyareti iptal et (sil)
+visitsRouter.delete(
+  "/:id",
+  asyncHandler(async (req, res) => {
+    const existing = await prisma.visit.findUnique({ where: { id: Number(req.params.id) } });
+    if (!existing) return res.status(404).json({ error: "Ziyaret bulunamadi" });
+    await prisma.visit.delete({ where: { id: existing.id } });
+    res.status(204).end();
   })
 );
 
@@ -98,8 +162,10 @@ visitsRouter.get(
     if (visit.checkOutAt) return res.status(400).json({ error: "Ziyaret zaten kapatilmis" });
     const now = new Date();
     const durationMin = diffMinutes(visit.checkInAt, now);
-    const amount = calculateAmount(visit.pricingPlan, durationMin);
-    res.json({ durationMin, amount });
+    const gross = calculateAmount(visit.pricingPlan, durationMin, visit.checkInAt) + (visit.extraCharge ?? 0);
+    const discount = visit.discount ?? 0;
+    const amount = Math.max(0, gross - discount);
+    res.json({ durationMin, gross, discount, amount });
   })
 );
 
@@ -122,7 +188,10 @@ visitsRouter.post(
 
     const now = new Date();
     const durationMin = diffMinutes(existing.checkInAt, now);
-    const amount = calculateAmount(existing.pricingPlan, durationMin);
+    const gross =
+      calculateAmount(existing.pricingPlan, durationMin, existing.checkInAt) +
+      (existing.extraCharge ?? 0);
+    const amount = Math.max(0, gross - (existing.discount ?? 0));
 
     const visit = await prisma.visit.update({
       where: { id: existing.id },
