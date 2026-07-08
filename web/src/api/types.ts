@@ -96,12 +96,27 @@ export interface Visit {
   staff?: { id: number; fullName: string } | null;
 }
 
+export interface TabItem {
+  id: number;
+  tabId: number;
+  productId: number;
+  quantity: number;
+  unitPrice: number;
+  vatRate: number;
+  lineTotal: number;
+  createdAt?: string;
+  product?: Product;
+}
+
 export interface TableTab {
   id: number;
   tableId: number;
   total: number;
+  paidAmount: number;
+  paymentMethod?: PaymentMethod | null;
   openedAt: string;
   closedAt?: string | null;
+  items?: TabItem[];
 }
 
 export interface CafeTable {

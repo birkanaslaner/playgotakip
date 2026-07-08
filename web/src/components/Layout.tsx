@@ -81,6 +81,15 @@ export function Layout({ children }: { children: ReactNode }) {
 
   const mini = collapsed && !hovered;
 
+  function isNavItemActive(to: string, end?: boolean): boolean {
+    const path = location.pathname;
+    if (to === "/sure-takip") {
+      return path === "/sure-takip" || path === "/giris-yap";
+    }
+    if (end) return path === to;
+    return path === to || path.startsWith(`${to}/`);
+  }
+
   function isGroupOpen(item: MenuItem) {
     if (openGroups[item.to] !== undefined) return openGroups[item.to];
     return location.pathname.startsWith(item.to);
@@ -182,7 +191,9 @@ export function Layout({ children }: { children: ReactNode }) {
                     to={item.to}
                     end={item.end}
                     title={mini ? item.label : undefined}
-                    className={linkClass(mini)}
+                    className={({ isActive }) =>
+                      linkClass(mini)({ isActive: isActive || isNavItemActive(item.to, item.end) })
+                    }
                     onClick={() => setMobileOpen(false)}
                   >
                     <Icon name={item.icon} />

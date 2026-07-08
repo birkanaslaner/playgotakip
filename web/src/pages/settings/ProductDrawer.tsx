@@ -1,4 +1,5 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { createPortal } from "react-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api, apiError } from "../../api/client";
 import type { Category, Product } from "../../api/types";
@@ -25,6 +26,10 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
   );
 }
 
+function clearZeroOnFocus(value: string): string {
+  return value === "0" || value === "0.00" ? "" : value;
+}
+
 export function ProductDrawer({
   onClose,
   onSaved,
@@ -41,21 +46,57 @@ export function ProductDrawer({
   const [categoryId, setCategoryId] = useState<string>(
     product?.categoryId ? String(product.categoryId) : ""
   );
-  const [price, setPrice] = useState(product ? String(product.price) : "0");
-  const [stock, setStock] = useState(product ? String(product.stock) : "0");
+  const [categorySearch, setCategorySearch] = useState("");
+  const [categoryOpen, setCategoryOpen] = useState(false);
+  const categoryRef = useRef<HTMLDivElement>(null);
+  const [price, setPrice] = useState(
+    product && product.price > 0 ? String(product.price) : ""
+  );
+  const [stock, setStock] = useState(product !== undefined ? String(product.stock) : "");
   const [vatRate, setVatRate] = useState(product?.vatRate ?? 10);
   const [active, setActive] = useState(product?.active ?? true);
   const [showInQrMenu, setShowInQrMenu] = useState(product?.showInQrMenu ?? true);
   const [qrDescription, setQrDescription] = useState(product?.qrDescription ?? "");
   const [tags, setTags] = useState(product?.tags ?? "");
   const [error, setError] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+  const [open, setOpen] = useState(false);
+  const closingRef = useRef(false);
+
+  const requestClose = useCallback(
+    (done?: () => void) => {
+      if (closingRef.current) {
+        done?.();
+        return;
+      }
+      closingRef.current = true;
+      setOpen(false);
+      window.setTimeout(() => {
+        done?.();
+        onClose();
+      }, 320);
+    },
+    [onClose]
+  );
 
   const categories = useQuery({
     queryKey: ["categories"],
     queryFn: async () => (await api.get<Category[]>("/categories")).data,
   });
 
+  const filteredCategories = useMemo(() => {
+    const q = categorySearch.trim().toLocaleLowerCase("tr");
+    return (categories.data ?? []).filter((c) =>
+      !q || c.name.toLocaleLowerCase("tr").includes(q)
+    );
+  }, [categories.data, categorySearch]);
+
+  const selectedCategory = categories.data?.find((c) => String(c.id) === categoryId);
   const priceNum = Number(price) || 0;
+  const nameError = submitted && !name.trim();
+  const categoryError = submitted && !categoryId;
+  const priceError = submitted && (price.trim() === "" || priceNum <= 0);
+  const stockError = submitted && stock.trim() === "";
   const net = priceNum / (1 + vatRate / 100);
   const vatAmount = priceNum - net;
 
@@ -63,7 +104,7 @@ export function ProductDrawer({
     mutationFn: async () => {
       const payload = {
         name,
-        categoryId: categoryId ? Number(categoryId) : null,
+        categoryId: Number(categoryId),
         price: priceNum,
         stock: Number(stock) || 0,
         vatRate,
@@ -79,7 +120,7 @@ export function ProductDrawer({
     },
     onSuccess: () => {
       onSaved();
-      onClose();
+      requestClose();
     },
     onError: (err) => setError(apiError(err, "Ürün kaydedilemedi")),
   });
@@ -96,22 +137,76 @@ export function ProductDrawer({
     reader.readAsDataURL(file);
   }
 
+  function removeImage() {
+    setImage(null);
+    if (fileRef.current) fileRef.current.value = "";
+  }
+
   function submit(e: FormEvent) {
     e.preventDefault();
+    setSubmitted(true);
     setError("");
-    if (!name.trim()) {
-      setError("Lütfen ürün adı girin");
-      return;
-    }
+    if (!name.trim()) return;
+    if (!categoryId) return;
+    if (price.trim() === "" || priceNum <= 0) return;
+    if (stock.trim() === "") return;
     create.mutate();
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setOpen(true));
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
+  useEffect(() => {
+    if (!categoryOpen) return;
+    const close = (e: MouseEvent) => {
+      if (categoryRef.current && !categoryRef.current.contains(e.target as Node)) {
+        setCategoryOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [categoryOpen]);
+
+  useEffect(() => {
+    const main = document.querySelector("main");
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+    const prevBodyOverflow = document.body.style.overflow;
+    const prevBodyPadding = document.body.style.paddingRight;
+    const prevMainOverflow = main instanceof HTMLElement ? main.style.overflow : "";
+
+    document.body.style.overflow = "hidden";
+    if (scrollbarWidth > 0) {
+      document.body.style.paddingRight = `${scrollbarWidth}px`;
+    }
+    if (main instanceof HTMLElement) {
+      main.style.overflow = "hidden";
+    }
+
+    return () => {
+      document.body.style.overflow = prevBodyOverflow;
+      document.body.style.paddingRight = prevBodyPadding;
+      if (main instanceof HTMLElement) {
+        main.style.overflow = prevMainOverflow;
+      }
+    };
+  }, []);
+
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex justify-end">
+      <div
+        className={`absolute inset-0 bg-black/40 transition-opacity duration-300 ease-in-out ${
+          open ? "opacity-100" : "opacity-0"
+        }`}
+        onClick={() => requestClose()}
+        aria-hidden
+      />
       <form
         onSubmit={submit}
-        className="relative flex h-full w-full max-w-md flex-col bg-white shadow-xl"
+        className={`relative flex h-screen w-full max-w-lg flex-col bg-white shadow-xl transition-transform duration-300 ease-in-out ${
+          open ? "translate-x-0" : "translate-x-full"
+        }`}
       >
         <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
           <div className="flex items-center gap-3">
@@ -122,7 +217,7 @@ export function ProductDrawer({
               {editing ? "Ürünü Düzenle" : "Yeni Ürün Ekle"}
             </h3>
           </div>
-          <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-600">
+          <button type="button" onClick={() => requestClose()} className="text-slate-400 hover:text-slate-600">
             <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
               <path strokeLinecap="round" d="M6 6l12 12M18 6 6 18" />
             </svg>
@@ -133,71 +228,164 @@ export function ProductDrawer({
           <div>
             <label className="label">Ürün Görseli</label>
             <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} />
-            <button
-              type="button"
-              onClick={() => fileRef.current?.click()}
-              className="flex w-full flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-200 px-4 py-6 text-center hover:border-brand-500"
-            >
-              {image ? (
-                <img src={image} alt="Önizleme" className="h-24 w-24 rounded-lg object-cover" />
-              ) : (
-                <>
-                  <span className="mb-2 flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-400">
-                    <Icon name="image" className="h-5 w-5" />
-                  </span>
-                  <span className="text-sm text-slate-500">Görsel yüklemek için tıklayın</span>
-                  <span className="text-xs text-slate-400">veya sürükleyin</span>
-                </>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                className="flex min-h-[140px] w-full flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-200 px-4 py-6 text-center hover:border-brand-500"
+              >
+                {image ? (
+                  <div className="flex h-28 w-full items-center justify-center">
+                    <img
+                      src={image}
+                      alt="Önizleme"
+                      className="max-h-full max-w-full rounded-lg object-contain object-center"
+                    />
+                  </div>
+                ) : (
+                  <>
+                    <span className="mb-2 flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-400">
+                      <Icon name="image" className="h-5 w-5" />
+                    </span>
+                    <span className="text-sm text-slate-500">Görsel yüklemek için tıklayın</span>
+                    <span className="text-xs text-slate-400">veya sürükleyin</span>
+                  </>
+                )}
+              </button>
+              {image && (
+                <button
+                  type="button"
+                  onClick={removeImage}
+                  className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-white text-slate-500 shadow-md ring-1 ring-slate-200 hover:bg-red-50 hover:text-red-500"
+                  aria-label="Görseli kaldır"
+                >
+                  <Icon name="close" className="h-4 w-4" />
+                </button>
               )}
-            </button>
+            </div>
           </div>
 
           <div>
-            <label className="label">Ürün Adı</label>
+            <label className="label">
+              Ürün Adı <span className="text-red-500">*</span>
+            </label>
             <input
-              className="input"
+              className={`input ${nameError ? "border-red-400 focus:border-red-400 focus:ring-red-100" : ""}`}
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Örn: Portakal Suyu"
             />
+            {nameError && <p className="mt-1 text-xs text-red-500">Lütfen ürün adı girin</p>}
           </div>
 
           <div>
-            <label className="label">Kategori</label>
-            <select className="input" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
-              <option value="">Kategori seçin</option>
-              {categories.data?.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+            <label className="label">
+              Kategori <span className="text-red-500">*</span>
+            </label>
+            <div ref={categoryRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setCategoryOpen((o) => !o)}
+                className={`input flex w-full items-center justify-between gap-2 text-left ${
+                  categoryError ? "border-red-400 focus:border-red-400 focus:ring-red-100" : ""
+                } ${selectedCategory ? "text-slate-800" : "text-slate-400"}`}
+              >
+                <span className="truncate">
+                  {selectedCategory?.name ?? "Kategori seçin"}
+                </span>
+                <Icon
+                  name="chevronDown"
+                  className={`h-4 w-4 shrink-0 text-slate-400 transition ${categoryOpen ? "rotate-180" : ""}`}
+                />
+              </button>
+
+              {categoryOpen && (
+                <div className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg">
+                  <div className="border-b border-slate-100 p-2">
+                    <div className="relative">
+                      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+                        <Icon name="search" className="h-4 w-4" />
+                      </span>
+                      <input
+                        className="input py-2 pl-9 text-sm"
+                        value={categorySearch}
+                        onChange={(e) => setCategorySearch(e.target.value)}
+                        placeholder="Kategori ara..."
+                        autoFocus
+                      />
+                    </div>
+                  </div>
+                  <div className="max-h-40 space-y-0.5 overflow-y-auto p-1">
+                    {categories.isLoading ? (
+                      <p className="px-3 py-3 text-sm text-slate-400">Yükleniyor...</p>
+                    ) : filteredCategories.length === 0 ? (
+                      <p className="px-3 py-3 text-sm text-slate-400">Kategori bulunamadı.</p>
+                    ) : (
+                      filteredCategories.map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => {
+                            setCategoryId(String(c.id));
+                            setCategoryOpen(false);
+                            setCategorySearch("");
+                          }}
+                          className={`flex w-full items-center rounded-md px-3 py-2 text-left text-sm transition ${
+                            categoryId === String(c.id)
+                              ? "bg-brand-50 font-semibold text-brand-700"
+                              : "text-slate-700 hover:bg-slate-50"
+                          }`}
+                        >
+                          {c.name}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+            {categoryError && (
+              <p className="mt-1 text-xs text-red-500">Lütfen kategori seçin</p>
+            )}
           </div>
 
           <div>
-            <label className="label">Satış Fiyatı</label>
+            <label className="label">
+              Satış Fiyatı <span className="text-red-500">*</span>
+            </label>
             <div className="relative">
               <input
                 type="number"
                 step="0.01"
-                className="input pr-8"
+                min="0"
+                className={`input pr-8 ${priceError ? "border-red-400 focus:border-red-400 focus:ring-red-100" : ""}`}
                 value={price}
                 onChange={(e) => setPrice(e.target.value)}
+                onFocus={() => setPrice((v) => clearZeroOnFocus(v))}
                 placeholder="0,00"
               />
               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">₺</span>
             </div>
+            {priceError && (
+              <p className="mt-1 text-xs text-red-500">Lütfen satış fiyatı girin</p>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="label">Stok</label>
+              <label className="label">
+                Stok <span className="text-red-500">*</span>
+              </label>
               <input
                 type="number"
-                className="input"
+                min="0"
+                className={`input ${stockError ? "border-red-400 focus:border-red-400 focus:ring-red-100" : ""}`}
                 value={stock}
                 onChange={(e) => setStock(e.target.value)}
+                onFocus={() => setStock((v) => clearZeroOnFocus(v))}
+                placeholder="0"
               />
+              {stockError && <p className="mt-1 text-xs text-red-500">Lütfen stok girin</p>}
             </div>
             <div>
               <label className="label">KDV Oranı (%)</label>
@@ -269,7 +457,7 @@ export function ProductDrawer({
         </div>
 
         <div className="flex items-center justify-end gap-2 border-t border-slate-100 px-6 py-4">
-          <button type="button" className="btn-ghost" onClick={onClose}>
+          <button type="button" className="btn-ghost" onClick={() => requestClose()}>
             İptal
           </button>
           <button type="submit" className="btn-primary" disabled={create.isPending}>
@@ -277,6 +465,7 @@ export function ProductDrawer({
           </button>
         </div>
       </form>
-    </div>
+    </div>,
+    document.body
   );
 }

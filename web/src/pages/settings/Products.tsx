@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import type { Category, Product } from "../../api/types";
@@ -8,6 +9,7 @@ import { ProductDrawer } from "./ProductDrawer";
 
 function CategoryRow({
   category,
+  productCount,
   onChanged,
   index,
   onDragStart,
@@ -15,6 +17,7 @@ function CategoryRow({
   onDragEnd,
 }: {
   category: Category;
+  productCount: number;
   onChanged: () => void;
   index: number;
   onDragStart: (i: number) => void;
@@ -109,7 +112,12 @@ function CategoryRow({
         <Icon name="box" className="h-4 w-4" />
       </span>
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-semibold text-slate-800">{category.name}</p>
+        <div className="flex items-center gap-2">
+          <p className="truncate text-sm font-semibold text-slate-800">{category.name}</p>
+          <span className="shrink-0 rounded-full border border-brand-200 bg-brand-50 px-2.5 py-0.5 text-xs font-medium text-brand-700">
+            {productCount} ürün
+          </span>
+        </div>
         {category.description && (
           <p className="truncate text-xs text-slate-400">{category.description}</p>
         )}
@@ -139,11 +147,44 @@ function CategoriesDrawer({ onClose }: { onClose: () => void }) {
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [open, setOpen] = useState(false);
+  const closingRef = useRef(false);
+
+  const requestClose = useCallback(
+    (done?: () => void) => {
+      if (closingRef.current) {
+        done?.();
+        return;
+      }
+      closingRef.current = true;
+      setOpen(false);
+      window.setTimeout(() => {
+        done?.();
+        onClose();
+      }, 320);
+    },
+    [onClose]
+  );
 
   const categories = useQuery({
     queryKey: ["categories"],
     queryFn: async () => (await api.get<Category[]>("/categories")).data,
   });
+
+  const products = useQuery({
+    queryKey: ["products"],
+    queryFn: async () => (await api.get<Product[]>("/products")).data,
+  });
+
+  const productCountByCategory = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const product of products.data ?? []) {
+      if (product.categoryId != null) {
+        map.set(product.categoryId, (map.get(product.categoryId) ?? 0) + 1);
+      }
+    }
+    return map;
+  }, [products.data]);
 
   const [items, setItems] = useState<Category[]>([]);
   const dragIndex = useRef<number | null>(null);
@@ -154,6 +195,7 @@ function CategoriesDrawer({ onClose }: { onClose: () => void }) {
 
   function refresh() {
     queryClient.invalidateQueries({ queryKey: ["categories"] });
+    queryClient.invalidateQueries({ queryKey: ["products"] });
   }
 
   function resetForm() {
@@ -199,10 +241,49 @@ function CategoriesDrawer({ onClose }: { onClose: () => void }) {
 
   const count = categories.data?.length ?? 0;
 
-  return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative flex h-full w-full max-w-md flex-col bg-white shadow-xl">
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setOpen(true));
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
+  useEffect(() => {
+    const main = document.querySelector("main");
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+    const prevBodyOverflow = document.body.style.overflow;
+    const prevBodyPadding = document.body.style.paddingRight;
+    const prevMainOverflow = main instanceof HTMLElement ? main.style.overflow : "";
+
+    document.body.style.overflow = "hidden";
+    if (scrollbarWidth > 0) {
+      document.body.style.paddingRight = `${scrollbarWidth}px`;
+    }
+    if (main instanceof HTMLElement) {
+      main.style.overflow = "hidden";
+    }
+
+    return () => {
+      document.body.style.overflow = prevBodyOverflow;
+      document.body.style.paddingRight = prevBodyPadding;
+      if (main instanceof HTMLElement) {
+        main.style.overflow = prevMainOverflow;
+      }
+    };
+  }, []);
+
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex justify-end">
+      <div
+        className={`absolute inset-0 bg-black/40 transition-opacity duration-300 ease-in-out ${
+          open ? "opacity-100" : "opacity-0"
+        }`}
+        onClick={() => requestClose()}
+        aria-hidden
+      />
+      <div
+        className={`relative flex h-screen w-full max-w-md flex-col bg-white shadow-xl transition-transform duration-300 ease-in-out ${
+          open ? "translate-x-0" : "translate-x-full"
+        }`}
+      >
         <div className="flex items-start justify-between border-b border-slate-100 px-6 py-4">
           <div className="flex items-start gap-3">
             <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-50 text-indigo-500">
@@ -213,7 +294,7 @@ function CategoriesDrawer({ onClose }: { onClose: () => void }) {
               <p className="text-xs text-slate-400">Ürün kategorilerinizi düzenleyin</p>
             </div>
           </div>
-          <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-600">
+          <button type="button" onClick={() => requestClose()} className="text-slate-400 hover:text-slate-600">
             <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
               <path strokeLinecap="round" d="M6 6l12 12M18 6 6 18" />
             </svg>
@@ -235,6 +316,7 @@ function CategoriesDrawer({ onClose }: { onClose: () => void }) {
               <CategoryRow
                 key={c.id}
                 category={c}
+                productCount={productCountByCategory.get(c.id) ?? 0}
                 index={i}
                 onChanged={refresh}
                 onDragStart={handleDragStart}
@@ -299,13 +381,14 @@ function CategoriesDrawer({ onClose }: { onClose: () => void }) {
             </button>
           )}
           <div className="flex justify-end">
-            <button className="btn-primary" onClick={onClose}>
+            <button className="btn-primary" onClick={() => requestClose()}>
               Bitti
             </button>
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -329,7 +412,11 @@ function ProductRow({
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-slate-100 text-slate-300">
             {product.image ? (
-              <img src={product.image} alt={product.name} className="h-full w-full object-cover" />
+              <img
+                src={product.image}
+                alt={product.name}
+                className="h-full w-full object-contain object-center p-0.5"
+              />
             ) : (
               <Icon name="box" className="h-5 w-5" />
             )}

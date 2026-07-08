@@ -6,6 +6,7 @@ import { Icon } from "./icons";
 const routeTitles: Record<string, string> = {
   "/": "Anasayfa",
   "/sure-takip": "Süre Takip",
+  "/giris-yap": "Yeni Kayıt",
   "/masalar": "Masalar",
   "/sms/gonder": "SMS Gönder",
   "/sms/gecmis": "Gönderim Geçmişi",
@@ -41,9 +42,14 @@ export function Topbar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
   const menuRef = useRef<HTMLDivElement>(null);
 
   const isSettings = location.pathname.startsWith("/ayarlar");
+  const tableDetailMatch = location.pathname.match(/^\/masalar\/(\d+)$/);
   const crumbs = isSettings
     ? ["Ayarlar", settingsTitles[location.pathname] ?? ""]
-    : [routeTitles[location.pathname] ?? "Anasayfa"];
+    : location.pathname === "/giris-yap"
+      ? ["Süre Takip", "Yeni Kayıt"]
+      : tableDetailMatch
+        ? ["Masalar", "Adisyon"]
+        : [routeTitles[location.pathname] ?? "Anasayfa"];
   const initial = (user?.fullName ?? "K").charAt(0).toUpperCase();
 
   useEffect(() => {

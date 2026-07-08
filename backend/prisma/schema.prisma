@@ -120,6 +120,7 @@ model Product {
   categoryId    Int?
   category      Category? @relation(fields: [categoryId], references: [id])
   createdAt     DateTime  @default(now())
+  tabItems      TabItem[]
 }
 
 model CafeTable {
@@ -132,12 +133,30 @@ model CafeTable {
 }
 
 model TableTab {
+  id            Int            @id @default(autoincrement())
+  tableId       Int
+  table         CafeTable      @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  total         Float          @default(0)
+  paidAmount    Float          @default(0)
+  paymentMethod PaymentMethod?
+  openedAt      DateTime       @default(now())
+  closedAt      DateTime?
+  items         TabItem[]
+}
+
+model TabItem {
   id        Int       @id @default(autoincrement())
-  tableId   Int
-  table     CafeTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
-  total     Float     @default(0)
-  openedAt  DateTime  @default(now())
-  closedAt  DateTime?
+  tabId     Int
+  tab       TableTab  @relation(fields: [tabId], references: [id], onDelete: Cascade)
+  productId Int
+  product   Product   @relation(fields: [productId], references: [id])
+  quantity  Int       @default(1)
+  unitPrice Float
+  vatRate   Int       @default(10)
+  lineTotal Float
+  createdAt DateTime  @default(now())
+
+  @@unique([tabId, productId])
 }
 
 model Visit {

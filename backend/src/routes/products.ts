@@ -9,7 +9,7 @@ productsRouter.use(authRequired);
 
 const productSchema = z.object({
   name: z.string().min(1, "Urun adi gerekli"),
-  categoryId: z.coerce.number().int().positive().optional().nullable(),
+  categoryId: z.coerce.number().int().positive("Kategori seçimi zorunludur"),
   price: z.coerce.number().nonnegative().default(0),
   stock: z.coerce.number().int().default(0),
   vatRate: z.coerce.number().int().min(0).max(100).default(10),
@@ -25,7 +25,7 @@ type ProductInput = z.infer<typeof productSchema>;
 function buildData(data: ProductInput) {
   return {
     name: data.name,
-    categoryId: data.categoryId ?? null,
+    categoryId: data.categoryId,
     price: data.price,
     stock: data.stock,
     vatRate: data.vatRate,

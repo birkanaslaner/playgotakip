@@ -14,6 +14,7 @@ import Reports from "./pages/Reports";
 import Messages from "./pages/Messages";
 import Iys from "./pages/Iys";
 import TableOrder from "./pages/TableOrder";
+import TableDetail from "./pages/TableDetail";
 import TimeTrackingSettings from "./pages/settings/TimeTracking";
 import ProductsSettings from "./pages/settings/Products";
 import Preferences from "./pages/settings/Preferences";
@@ -44,6 +45,7 @@ export default function App() {
       <Route path="/sure-takip" element={<P><CheckOut /></P>} />
       <Route path="/giris-yap" element={<P><CheckIn /></P>} />
       <Route path="/masalar" element={<P><TableOrder /></P>} />
+      <Route path="/masalar/:id" element={<P><TableDetail /></P>} />
 
       {/* MESAJLASMA */}
       <Route path="/sms/gonder" element={<P><Messages /></P>} />

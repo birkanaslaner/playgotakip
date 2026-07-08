@@ -43,7 +43,11 @@ export type IconName =
   | "bolt"
   | "play"
   | "warn"
-  | "coffee";
+  | "coffee"
+  | "chevronLeft"
+  | "printer"
+  | "bag"
+  | "move";
 
 export function Icon({ name, className = "h-5 w-5" }: { name: IconName; className?: string }) {
   const p = {
@@ -371,6 +375,34 @@ export function Icon({ name, className = "h-5 w-5" }: { name: IconName; classNam
         <svg {...p}>
           <path d="M6 8h12v6a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V8Z" />
           <path d="M18 10h1a3 3 0 0 1 0 6h-1M6 4v2M10 4v2M14 4v2" />
+        </svg>
+      );
+    case "chevronLeft":
+      return (
+        <svg {...p}>
+          <path d="m15 18-6-6 6-6" />
+        </svg>
+      );
+    case "printer":
+      return (
+        <svg {...p}>
+          <path d="M6 9V3h12v6" />
+          <rect x="6" y="13" width="12" height="8" rx="1" />
+          <path d="M6 17H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+        </svg>
+      );
+    case "bag":
+      return (
+        <svg {...p}>
+          <path d="M6 7h12l-1 14H7L6 7Z" />
+          <path d="M9 7V5a3 3 0 0 1 6 0v2" />
+        </svg>
+      );
+    case "move":
+      return (
+        <svg {...p}>
+          <path d="M12 3v18M3 12h18" />
+          <path d="m8 7-5 5 5 5M16 7l5 5-5 5" />
         </svg>
       );
   }
