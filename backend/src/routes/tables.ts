@@ -106,6 +106,8 @@ const updateSchema = z.object({
   status: z.enum(["UYGUN", "DOLU", "PASIF"]).optional(),
 });
 
+const reorderSchema = z.object({ ids: z.array(z.coerce.number().int()) });
+
 tablesRouter.get(
   "/",
   asyncHandler(async (_req, res) => {
@@ -131,6 +133,18 @@ tablesRouter.get(
   })
 );
 
+tablesRouter.put(
+  "/reorder",
+  asyncHandler(async (req, res) => {
+    const { ids } = reorderSchema.parse(req.body);
+    await prisma.$transaction(
+      ids.map((id, index) => prisma.cafeTable.update({ where: { id }, data: { sortOrder: index } }))
+    );
+    const tables = await listTablesWithOpenTab();
+    res.json(tables);
+  })
+);
+
 tablesRouter.get(
   "/:id",
   asyncHandler(async (req, res) => {
@@ -153,6 +167,14 @@ const updateItemSchema = z.object({
 const paymentSchema = z.object({
   amount: z.coerce.number().positive().optional(),
   method: z.enum(["NAKIT", "KART"]).default("NAKIT"),
+  items: z
+    .array(
+      z.object({
+        itemId: z.coerce.number().int().positive(),
+        quantity: z.coerce.number().int().positive(),
+      })
+    )
+    .optional(),
 });
 
 const moveSchema = z.object({
@@ -319,12 +341,101 @@ tablesRouter.post(
       return res.status(400).json({ error: "Adisyona ürün ekleyin" });
     }
 
+    const selectedItems = data.items ?? [];
+    let payAmount = data.amount ?? Math.max(0, tab.total - tab.paidAmount);
+
+    if (selectedItems.length > 0) {
+      const tabItemById = new Map(tab.items.map((item) => [item.id, item]));
+      let selectedGross = 0;
+
+      for (const selected of selectedItems) {
+        const item = tabItemById.get(selected.itemId);
+        if (!item) {
+          return res.status(400).json({ error: "Seçilen ürün adisyonda bulunamadı" });
+        }
+        if (selected.quantity > item.quantity) {
+          return res.status(400).json({
+            error: `${item.quantity} adetten fazla tahsilat yapılamaz`,
+          });
+        }
+        selectedGross += item.unitPrice * selected.quantity;
+      }
+
+      selectedGross = Number(selectedGross.toFixed(2));
+      if (selectedGross <= 0) {
+        return res.status(400).json({ error: "Tahsil edilecek ürün seçin" });
+      }
+
+      // Parçalı ödemede ürünler düşüldüğü için kalan = mevcut adisyon toplamı
+      if (selectedGross > tab.total + 0.001) {
+        return res.status(400).json({ error: "Ödeme tutarı kalan tutardan fazla olamaz" });
+      }
+
+      payAmount = data.amount ?? selectedGross;
+      if (payAmount <= 0) {
+        return res.status(400).json({ error: "Ödeme tutarı geçersiz" });
+      }
+      if (payAmount > selectedGross + 0.001) {
+        return res.status(400).json({ error: "Ödeme tutarı seçili tutardan fazla olamaz" });
+      }
+
+      for (const selected of selectedItems) {
+        const item = tabItemById.get(selected.itemId)!;
+        const leftQty = item.quantity - selected.quantity;
+        if (leftQty <= 0) {
+          await prisma.tabItem.delete({ where: { id: item.id } });
+        } else {
+          await prisma.tabItem.update({
+            where: { id: item.id },
+            data: {
+              quantity: leftQty,
+              lineTotal: Number((leftQty * item.unitPrice).toFixed(2)),
+            },
+          });
+        }
+      }
+
+      await recalcTabTotal(tab.id);
+
+      const leftoverItems = await prisma.tabItem.count({ where: { tabId: tab.id } });
+      const newPaid = Number((tab.paidAmount + payAmount).toFixed(2));
+
+      if (leftoverItems === 0) {
+        await prisma.tableTab.update({
+          where: { id: tab.id },
+          data: {
+            paidAmount: newPaid,
+            paymentMethod: data.method,
+            closedAt: new Date(),
+            total: newPaid,
+          },
+        });
+        await prisma.cafeTable.update({
+          where: { id: tableId },
+          data: { status: "UYGUN" },
+        });
+      } else {
+        // Parçalı ödeme: tahsil edilen ürünler düşüldü, kalanlar masada kalır.
+        // paidAmount birikimli tahsilatı tutar (Ödenen alanında gösterilir).
+        await prisma.tableTab.update({
+          where: { id: tab.id },
+          data: {
+            paidAmount: newPaid,
+            paymentMethod: data.method,
+          },
+        });
+      }
+
+      const detail = await loadTableDetail(tableId);
+      return res.json(detail);
+    }
+
     const remaining = Math.max(0, tab.total - tab.paidAmount);
     if (remaining <= 0) {
       return res.status(400).json({ error: "Ödenecek tutar kalmadı" });
     }
 
-    const payAmount = data.amount ?? remaining;
+    payAmount = data.amount ?? remaining;
     if (payAmount > remaining) {
       return res.status(400).json({ error: "Ödeme tutarı kalan tutardan fazla olamaz" });
     }
@@ -376,30 +487,80 @@ tablesRouter.post(
 
     const targetTable = await prisma.cafeTable.findUnique({
       where: { id: targetTableId },
-      include: { tabs: { where: { closedAt: null } } },
+      include: {
+        tabs: {
+          where: { closedAt: null },
+          include: { items: true },
+          take: 1,
+        },
+      },
     });
     if (!targetTable) return res.status(404).json({ error: "Hedef masa bulunamadı" });
     if (targetTable.status === "PASIF") {
       return res.status(400).json({ error: "Pasif masaya adisyon taşınamaz" });
     }
-    if (targetTable.tabs.length > 0) {
-      return res.status(400).json({ error: "Hedef masada zaten açık adisyon var" });
-    }
 
-    await prisma.$transaction([
-      prisma.tableTab.update({
-        where: { id: sourceTab.id },
-        data: { tableId: targetTableId },
-      }),
-      prisma.cafeTable.update({
+    const targetTab = targetTable.tabs[0] ?? null;
+
+    if (!targetTab) {
+      await prisma.$transaction([
+        prisma.tableTab.update({
+          where: { id: sourceTab.id },
+          data: { tableId: targetTableId },
+        }),
+        prisma.cafeTable.update({
+          where: { id: sourceTableId },
+          data: { status: "UYGUN" },
+        }),
+        prisma.cafeTable.update({
+          where: { id: targetTableId },
+          data: { status: "DOLU" },
+        }),
+      ]);
+    } else {
+      // Hedef masada açık adisyon varsa ürünleri birleştir
+      for (const item of sourceTab.items) {
+        const existing = targetTab.items.find((t) => t.productId === item.productId);
+        if (existing) {
+          const quantity = existing.quantity + item.quantity;
+          await prisma.tabItem.update({
+            where: { id: existing.id },
+            data: {
+              quantity,
+              lineTotal: Number((quantity * existing.unitPrice).toFixed(2)),
+            },
+          });
+          await prisma.tabItem.delete({ where: { id: item.id } });
+        } else {
+          await prisma.tabItem.update({
+            where: { id: item.id },
+            data: { tabId: targetTab.id },
+          });
+        }
+      }
+
+      await recalcTabTotal(targetTab.id);
+      const refreshedTarget = await prisma.tableTab.findUnique({ where: { id: targetTab.id } });
+      await prisma.tableTab.update({
+        where: { id: targetTab.id },
+        data: {
+          paidAmount: Number(
+            ((refreshedTarget?.paidAmount ?? targetTab.paidAmount) + sourceTab.paidAmount).toFixed(2)
+          ),
+          paymentMethod: targetTab.paymentMethod ?? sourceTab.paymentMethod,
+        },
+      });
+
+      await prisma.tableTab.delete({ where: { id: sourceTab.id } });
+      await prisma.cafeTable.update({
         where: { id: sourceTableId },
         data: { status: "UYGUN" },
-      }),
-      prisma.cafeTable.update({
+      });
+      await prisma.cafeTable.update({
         where: { id: targetTableId },
         data: { status: "DOLU" },
-      }),
-    ]);
+      });
+    }
 
     const detail = await loadTableDetail(targetTableId);
     res.json(detail);

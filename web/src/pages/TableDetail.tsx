@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
@@ -86,14 +86,59 @@ function ProductCard({
   );
 }
 
-function SavedItemRow({ item }: { item: TabItem }) {
+function SavedItemRow({
+  item,
+  editingItem,
+  pending,
+  isEditing,
+  onEdit,
+  onSave,
+  onDecrease,
+  onIncrease,
+  onRemove,
+}: {
+  item: TabItem;
+  editingItem: TabItem;
+  pending: boolean;
+  isEditing: boolean;
+  onEdit: () => void;
+  onSave: () => void;
+  onDecrease: () => void;
+  onIncrease: () => void;
+  onRemove: () => void;
+}) {
+  if (isEditing) {
+    return (
+      <OrderItemRow
+        item={editingItem}
+        pending={pending}
+        variant="saved"
+        onSave={onSave}
+        onDecrease={onDecrease}
+        onIncrease={onIncrease}
+        onRemove={onRemove}
+      />
+    );
+  }
+
   return (
-    <div className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2.5">
+    <div className="group relative flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2.5">
       <p className="truncate text-sm font-medium text-slate-800">{item.product?.name ?? "Ürün"}</p>
       <div className="flex shrink-0 items-center gap-3">
         <span className="text-sm font-semibold text-slate-500">x{item.quantity}</span>
         <span className="text-sm font-bold text-slate-800">{formatCurrency(item.lineTotal)}</span>
       </div>
+      <button
+        type="button"
+        className="absolute inset-0 z-[1] flex items-center justify-center rounded-lg bg-white/80 opacity-0 transition group-hover:opacity-100"
+        onClick={onEdit}
+        aria-label={`${item.product?.name ?? "Ürün"} düzenle`}
+      >
+        <span className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm">
+          <Icon name="pencil" className="h-3.5 w-3.5" />
+          Düzenle
+        </span>
+      </button>
     </div>
   );
 }
@@ -114,55 +159,20 @@ function SectionHeader({ label, tone }: { label: string; tone: "new" | "saved" }
   );
 }
 
-type SavedSnapshot = { productId: number; quantity: number }[];
+type DraftItem = { productId: number; quantity: number };
 
-function splitItems(items: TabItem[], snapshot: SavedSnapshot) {
-  if (snapshot.length === 0) {
-    return { saved: [] as TabItem[], unsaved: items };
-  }
-
-  const savedMap = new Map(snapshot.map((s) => [s.productId, s.quantity]));
-  const saved: TabItem[] = [];
-  const unsaved: TabItem[] = [];
-
-  for (const item of items) {
-    const snapQty = savedMap.get(item.productId) ?? 0;
-    if (snapQty <= 0) {
-      unsaved.push(item);
-      continue;
-    }
-    if (item.quantity <= snapQty) {
-      saved.push(item);
-    } else {
-      saved.push({
-        ...item,
-        quantity: snapQty,
-        lineTotal: Number((snapQty * item.unitPrice).toFixed(2)),
-      });
-      unsaved.push({
-        ...item,
-        quantity: item.quantity - snapQty,
-        lineTotal: Number(((item.quantity - snapQty) * item.unitPrice).toFixed(2)),
-      });
-    }
-  }
-
-  return { saved, unsaved };
-}
-
-function hasUnsavedChanges(items: TabItem[], snapshot: SavedSnapshot, tabSavedOnce: boolean): boolean {
-  if (!tabSavedOnce) return items.length > 0;
-
-  const current = new Map(items.map((i) => [i.productId, i.quantity]));
-  const snap = new Map(snapshot.map((s) => [s.productId, s.quantity]));
-
-  for (const [productId, qty] of current) {
-    if ((snap.get(productId) ?? 0) !== qty) return true;
-  }
-  for (const productId of snap.keys()) {
-    if (!current.has(productId)) return true;
-  }
-  return false;
+function draftToTabItem(draft: DraftItem, product?: Product): TabItem {
+  const unitPrice = product?.price ?? 0;
+  return {
+    id: -draft.productId,
+    tabId: 0,
+    productId: draft.productId,
+    quantity: draft.quantity,
+    unitPrice,
+    vatRate: product?.vatRate ?? 10,
+    lineTotal: Number((unitPrice * draft.quantity).toFixed(2)),
+    product,
+  };
 }
 
 function CancelTabModal({
@@ -224,28 +234,57 @@ function OrderItemRow({
   onDecrease,
   onIncrease,
   onRemove,
+  onSave,
+  variant = "new",
 }: {
   item: TabItem;
   pending: boolean;
   onDecrease: () => void;
   onIncrease: () => void;
   onRemove: () => void;
+  onSave?: () => void;
+  variant?: "new" | "saved";
 }) {
+  const isSaved = variant === "saved";
+
   return (
-    <div className="rounded-lg border border-orange-100 bg-orange-50/80 px-3 py-2.5">
+    <div
+      className={`rounded-lg border px-3 py-2.5 ${
+        isSaved ? "border-slate-200 bg-white" : "border-orange-100 bg-orange-50/80"
+      }`}
+    >
       <div className="flex items-start justify-between gap-2">
-        <p className="text-xs font-bold text-slate-800">{item.product?.name ?? "Ürün"}</p>
-        <button
-          type="button"
-          className="shrink-0 text-slate-400 hover:text-red-500"
-          disabled={pending}
-          onClick={onRemove}
-          aria-label="Kalemi sil"
-        >
-          <Icon name="trash" className="h-5 w-5" />
-        </button>
+        <p className="truncate text-sm font-medium text-slate-800">
+          {item.product?.name ?? "Ürün"}
+        </p>
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            className="rounded-md p-0.5 text-slate-400 hover:bg-red-50 hover:text-red-500"
+            disabled={pending}
+            onClick={onRemove}
+            aria-label="Kalemi sil"
+          >
+            <Icon name="trash" className="h-5 w-5" />
+          </button>
+          {onSave && (
+            <button
+              type="button"
+              className="rounded-md p-0.5 text-emerald-500 hover:bg-emerald-50 hover:text-emerald-600"
+              disabled={pending}
+              onClick={onSave}
+              aria-label="Değişiklikleri kaydet"
+            >
+              <Icon name="check" className="h-5 w-5" />
+            </button>
+          )}
+        </div>
       </div>
-      <p className="mt-0.5 text-xs font-extrabold text-orange-500">{formatCurrency(item.unitPrice)}</p>
+      <p
+        className={`mt-0.5 text-xs font-extrabold ${isSaved ? "text-brand-600" : "text-orange-500"}`}
+      >
+        {formatCurrency(item.unitPrice)}
+      </p>
       <div className="mt-2 flex items-center justify-between">
         <div className="inline-flex items-center overflow-hidden rounded-md border border-slate-200 bg-white">
           <button
@@ -268,7 +307,7 @@ function OrderItemRow({
             +
           </button>
         </div>
-        <p className="text-xs font-bold text-slate-800">{formatCurrency(item.lineTotal)}</p>
+        <p className="text-sm font-bold text-slate-800">{formatCurrency(item.lineTotal)}</p>
       </div>
     </div>
   );
@@ -333,82 +372,329 @@ function printTabReceipt(tableName: string, tabLabel: string, items: TabItem[], 
   win.document.close();
 }
 
-function PaymentModal({
-  tableName,
-  amount,
+function buildFullSelection(items: TabItem[]): Record<number, number> {
+  const next: Record<number, number> = {};
+  for (const item of items) next[item.id] = item.quantity;
+  return next;
+}
+
+function PaymentDrawer({
+  items,
+  remaining,
   pending,
   error,
   onClose,
   onConfirm,
 }: {
-  tableName: string;
-  amount: number;
+  items: TabItem[];
+  remaining: number;
   pending: boolean;
   error: string;
   onClose: () => void;
-  onConfirm: (method: PaymentMethod) => void;
+  onConfirm: (
+    method: PaymentMethod,
+    amount: number,
+    selectedItems: { itemId: number; quantity: number }[]
+  ) => void;
 }) {
+  const [open, setOpen] = useState(false);
   const [method, setMethod] = useState<PaymentMethod>("NAKIT");
+  const [discountInput, setDiscountInput] = useState("0.00");
+  const [selection, setSelection] = useState<Record<number, number>>(() => buildFullSelection(items));
+
+  useEffect(() => {
+    const id = window.requestAnimationFrame(() => setOpen(true));
+    return () => window.cancelAnimationFrame(id);
+  }, []);
+
+  function requestClose() {
+    if (pending) return;
+    setOpen(false);
+    window.setTimeout(onClose, 280);
+  }
+
+  const selectedTotal = useMemo(() => {
+    let total = 0;
+    for (const item of items) {
+      const qty = selection[item.id] ?? 0;
+      if (qty > 0) total += item.unitPrice * qty;
+    }
+    return Number(total.toFixed(2));
+  }, [items, selection]);
+
+  const discountPercent = Math.min(100, Math.max(0, Number(discountInput.replace(",", ".")) || 0));
+  const discountAmount = Number(((selectedTotal * discountPercent) / 100).toFixed(2));
+  const netTotal = Number(Math.max(0, selectedTotal - discountAmount).toFixed(2));
+  const payableAmount = Math.min(netTotal, remaining);
+  const hasSelection = payableAmount > 0;
+
+  function selectAll() {
+    setSelection(buildFullSelection(items));
+  }
+
+  function clearSelection() {
+    setSelection({});
+  }
+
+  function toggleItem(item: TabItem) {
+    setSelection((prev) => {
+      const current = prev[item.id] ?? 0;
+      if (current > 0) {
+        const next = { ...prev };
+        delete next[item.id];
+        return next;
+      }
+      return { ...prev, [item.id]: item.quantity };
+    });
+  }
+
+  function setItemQty(item: TabItem, qty: number) {
+    setSelection((prev) => {
+      const next = { ...prev };
+      if (qty <= 0) {
+        delete next[item.id];
+        return next;
+      }
+      next[item.id] = Math.min(item.quantity, qty);
+      return next;
+    });
+  }
 
   return createPortal(
-    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/30 p-4">
-      <div className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
-        <button
-          type="button"
-          onClick={onClose}
-          disabled={pending}
-          className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200"
-          aria-label="Kapat"
-        >
-          <Icon name="close" className="h-4 w-4" />
-        </button>
-
-        <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
-          <Icon name="creditCard" className="h-6 w-6" />
+    <div className="fixed inset-0 z-[110] flex justify-end">
+      <div
+        className={`absolute inset-0 bg-black/40 transition-opacity duration-300 ease-in-out ${
+          open ? "opacity-100" : "opacity-0"
+        }`}
+        onClick={requestClose}
+        aria-hidden
+      />
+      <div
+        className={`relative flex h-full w-full max-w-md flex-col bg-white shadow-xl transition-transform duration-300 ease-in-out ${
+          open ? "translate-x-0" : "translate-x-full"
+        }`}
+      >
+        <div className="flex items-start justify-between border-b border-slate-100 px-5 py-4">
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 flex h-11 w-11 items-center justify-center rounded-full bg-emerald-500 text-white">
+              <span className="text-lg font-bold leading-none">$</span>
+            </span>
+            <div>
+              <h3 className="text-lg font-bold text-slate-800">Ödeme ve Tahsilat</h3>
+              <p className="mt-0.5 text-sm text-slate-500">Ödenecek ürünleri seçin</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={requestClose}
+            disabled={pending}
+            className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            aria-label="Kapat"
+          >
+            <Icon name="close" className="h-5 w-5" />
+          </button>
         </div>
 
-        <h3 className="text-xl font-bold text-slate-800">Ödeme Al</h3>
-        <p className="mt-1 text-sm text-slate-500">{tableName} adisyonu</p>
-
-        <div className="mt-5 rounded-xl bg-slate-50 px-4 py-3">
-          <div className="text-xs font-medium uppercase tracking-wide text-slate-400">Ödenecek tutar</div>
-          <div className="text-2xl font-bold text-brand-600">{formatCurrency(amount)}</div>
-        </div>
-
-        <div className="mt-5">
-          <div className="mb-2 text-sm font-medium text-slate-600">Ödeme yöntemi</div>
-          <div className="flex gap-2">
-            {(["NAKIT", "KART"] as PaymentMethod[]).map((m) => (
+        <div className="flex-1 overflow-y-auto px-5 py-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-500">Ürünler</h4>
+            <div className="flex items-center gap-3 text-xs font-semibold">
+              <button type="button" className="text-brand-600 hover:text-brand-700" onClick={selectAll} disabled={pending}>
+                Tümünü Seç
+              </button>
               <button
-                key={m}
                 type="button"
-                onClick={() => setMethod(m)}
+                className="text-slate-400 hover:text-slate-600"
+                onClick={clearSelection}
                 disabled={pending}
-                className={`flex-1 rounded-lg border px-3 py-2.5 text-sm font-medium transition ${
-                  method === m
+              >
+                Seçimi Temizle
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            {items.map((item) => {
+              const selectedQty = selection[item.id] ?? 0;
+              const checked = selectedQty > 0;
+              const lineTotal = Number((item.unitPrice * (checked ? selectedQty : item.quantity)).toFixed(2));
+              const canAdjustQty = item.quantity > 1;
+
+              return (
+                <div
+                  key={item.id}
+                  className={`rounded-xl border px-3 py-3 transition ${
+                    checked ? "border-brand-200 bg-brand-50/40" : "border-slate-200 bg-white"
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <button
+                      type="button"
+                      disabled={pending}
+                      onClick={() => toggleItem(item)}
+                      className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border transition ${
+                        checked
+                          ? "border-brand-600 bg-brand-600 text-white"
+                          : "border-slate-300 bg-white text-transparent"
+                      }`}
+                      aria-label={checked ? "Seçimi kaldır" : "Ürünü seç"}
+                    >
+                      <Icon name="check" className="h-3.5 w-3.5" />
+                    </button>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-bold text-slate-800">
+                            {item.product?.name ?? "Ürün"}
+                          </p>
+                          <p className="mt-0.5 text-xs font-semibold text-slate-400">
+                            {formatCurrency(item.unitPrice)}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-3">
+                          {canAdjustQty && checked ? (
+                            <div className="inline-flex items-center overflow-hidden rounded-md border border-slate-200 bg-white">
+                              <button
+                                type="button"
+                                className="flex h-7 w-7 items-center justify-center text-sm text-slate-500 hover:bg-slate-50"
+                                disabled={pending}
+                                onClick={() => setItemQty(item, selectedQty - 1)}
+                              >
+                                −
+                              </button>
+                              <span className="flex h-7 min-w-[28px] items-center justify-center border-x border-slate-200 text-xs font-semibold text-slate-700">
+                                {selectedQty}
+                              </span>
+                              <button
+                                type="button"
+                                className="flex h-7 w-7 items-center justify-center text-sm text-slate-500 hover:bg-slate-50"
+                                disabled={pending || selectedQty >= item.quantity}
+                                onClick={() => setItemQty(item, selectedQty + 1)}
+                              >
+                                +
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-sm font-semibold text-slate-500">x{item.quantity}</span>
+                          )}
+                          <p className="text-sm font-bold text-slate-800">
+                            {formatCurrency(
+                              checked ? Number((item.unitPrice * selectedQty).toFixed(2)) : lineTotal
+                            )}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="mt-6">
+            <h4 className="mb-3 text-xs font-extrabold uppercase tracking-wider text-slate-500">
+              Ödeme Yöntemi
+            </h4>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() => setMethod("NAKIT")}
+                className={`flex flex-col items-center gap-2 rounded-xl border px-3 py-4 text-sm font-semibold transition ${
+                  method === "NAKIT"
                     ? "border-brand-500 bg-brand-50 text-brand-700"
                     : "border-slate-200 text-slate-600 hover:bg-slate-50"
                 }`}
               >
-                {m === "NAKIT" ? "Nakit" : "Kart"}
+                <span
+                  className={`flex h-9 w-9 items-center justify-center rounded-full text-base font-bold ${
+                    method === "NAKIT" ? "bg-brand-100 text-brand-600" : "bg-slate-100 text-slate-500"
+                  }`}
+                >
+                  $
+                </span>
+                Nakit
               </button>
-            ))}
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() => setMethod("KART")}
+                className={`flex flex-col items-center gap-2 rounded-xl border px-3 py-4 text-sm font-semibold transition ${
+                  method === "KART"
+                    ? "border-brand-500 bg-brand-50 text-brand-700"
+                    : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                <span
+                  className={`flex h-9 w-9 items-center justify-center rounded-full ${
+                    method === "KART" ? "bg-brand-100 text-brand-600" : "bg-slate-100 text-slate-500"
+                  }`}
+                >
+                  <Icon name="creditCard" className="h-5 w-5" />
+                </span>
+                Kredi Kartı
+              </button>
+            </div>
           </div>
+
+          <div className="mt-6">
+            <label className="mb-2 block text-xs font-extrabold uppercase tracking-wider text-slate-500">
+              İndirim (%)
+            </label>
+            <input
+              type="text"
+              inputMode="decimal"
+              className="input"
+              value={discountInput}
+              placeholder="0.00"
+              disabled={pending}
+              onFocus={() => {
+                if (discountInput === "0.00" || discountInput === "0") {
+                  setDiscountInput("");
+                }
+              }}
+              onChange={(e) => setDiscountInput(e.target.value)}
+              onBlur={() => {
+                const n = Math.min(100, Math.max(0, Number(discountInput.replace(",", ".")) || 0));
+                setDiscountInput(n.toFixed(2));
+              }}
+            />
+          </div>
+
+          {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
         </div>
 
-        {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
-
-        <div className="mt-6 flex gap-3">
-          <button type="button" className="btn-ghost flex-1" onClick={onClose} disabled={pending}>
-            İptal
-          </button>
+        <div className="border-t border-slate-100 px-5 py-4">
+          <div className="mb-1 flex items-center justify-between text-sm text-slate-500">
+            <span>Seçili Toplam</span>
+            <span className="font-semibold text-slate-700">{formatCurrency(selectedTotal)}</span>
+          </div>
+          {discountAmount > 0 && (
+            <div className="mb-1 flex items-center justify-between text-sm text-slate-500">
+              <span>İndirim</span>
+              <span className="font-semibold text-red-500">−{formatCurrency(discountAmount)}</span>
+            </div>
+          )}
+          <div className="mb-4 flex items-end justify-between">
+            <span className="text-xs font-extrabold uppercase tracking-wider text-slate-500">
+              Net Tahsilat
+            </span>
+            <span className="text-2xl font-extrabold text-emerald-600">{formatCurrency(payableAmount)}</span>
+          </div>
           <button
             type="button"
-            className="btn-primary flex-1"
-            onClick={() => onConfirm(method)}
-            disabled={pending}
+            disabled={pending || !hasSelection}
+            onClick={() => {
+              const selectedItems = items
+                .map((item) => ({ itemId: item.id, quantity: selection[item.id] ?? 0 }))
+                .filter((item) => item.quantity > 0);
+              onConfirm(method, payableAmount, selectedItems);
+            }}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3.5 text-sm font-bold uppercase tracking-wide text-white transition hover:bg-emerald-600 disabled:opacity-60"
           >
-            {pending ? "İşleniyor..." : "Ödemeyi Al"}
+            <Icon name="check" className="h-5 w-5" />
+            {pending ? "İşleniyor..." : "Tahsilatı Tamamla"}
           </button>
         </div>
       </div>
@@ -433,68 +719,125 @@ function MoveModal({
   onConfirm: (targetTableId: number) => void;
 }) {
   const [selected, setSelected] = useState<number | null>(null);
-  const available = tables.filter(
-    (t) => t.id !== currentTableId && t.status === "UYGUN" && !t.openTab
-  );
+  const [query, setQuery] = useState("");
+
+  const candidates = useMemo(() => {
+    const q = query.trim().toLocaleLowerCase("tr");
+    return tables
+      .filter((t) => t.id !== currentTableId && t.status !== "PASIF")
+      .filter((t) => (q ? t.name.toLocaleLowerCase("tr").includes(q) : true))
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id);
+  }, [tables, currentTableId, query]);
 
   return createPortal(
-    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/30 p-4">
-      <div className="relative flex max-h-[85vh] w-full max-w-md flex-col rounded-2xl bg-white shadow-xl">
-        <div className="border-b border-slate-100 px-6 py-5">
+    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 p-4">
+      <div className="relative flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
+        <div className="px-6 pt-6 pb-4">
           <button
             type="button"
             onClick={onClose}
             disabled={pending}
-            className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200"
+            className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600"
             aria-label="Kapat"
           >
-            <Icon name="close" className="h-4 w-4" />
+            <Icon name="close" className="h-5 w-5" />
           </button>
-          <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-slate-100 text-slate-500">
-            <Icon name="move" className="h-6 w-6" />
+          <h3 className="text-2xl font-bold text-slate-900">Masayı Taşı</h3>
+          <p className="mt-1 text-xs font-semibold uppercase tracking-wider text-slate-400">
+            Adisyon Aktarımı
+          </p>
+
+          <div className="mt-5 flex gap-3 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3">
+            <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-sky-500 text-white">
+              <Icon name="info" className="h-3.5 w-3.5" />
+            </span>
+            <div>
+              <p className="text-sm font-bold text-sky-900">Masa Taşıma Bilgisi</p>
+              <p className="mt-1 text-sm leading-relaxed text-sky-800/80">
+                Bu işlem mevcut adisyonu tüm ürünleri ile birlikte başka bir masaya taşır. Hedef masa
+                boş olmalıdır veya açık bir adisyonu varsa birleştirilir.
+              </p>
+            </div>
           </div>
-          <h3 className="text-xl font-bold text-slate-800">Adisyonu Taşı</h3>
-          <p className="mt-1 text-sm text-slate-500">Adisyonu taşımak istediğiniz masayı seçin.</p>
+
+          <div className="relative mt-4">
+            <Icon
+              name="search"
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+            />
+            <input
+              type="search"
+              className="input pl-9"
+              placeholder="Masa ara..."
+              value={query}
+              disabled={pending}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4">
-          {available.length === 0 ? (
-            <p className="py-8 text-center text-sm text-slate-400">Uygun masa bulunamadı.</p>
+        <div className="flex-1 overflow-y-auto px-6 pb-2">
+          <div className="mb-3 flex items-center justify-between">
+            <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-500">
+              Uygun Masalar
+            </h4>
+            <span className="rounded-full bg-sky-100 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-sky-700">
+              {candidates.length} Masa
+            </span>
+          </div>
+
+          {candidates.length === 0 ? (
+            <p className="py-10 text-center text-sm text-slate-400">Uygun masa bulunamadı.</p>
           ) : (
-            <div className="space-y-2">
-              {available.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => setSelected(t.id)}
-                  disabled={pending}
-                  className={`flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left transition ${
-                    selected === t.id
-                      ? "border-brand-500 bg-brand-50"
-                      : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"
-                  }`}
-                >
-                  <Icon name="table" className="h-5 w-5 text-slate-400" />
-                  <span className="font-semibold text-slate-800">{t.name}</span>
-                </button>
-              ))}
+            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+              {candidates.map((t) => {
+                const busy = Boolean(t.openTab) || t.status === "DOLU";
+                const isSelected = selected === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    disabled={pending}
+                    onClick={() => setSelected(t.id)}
+                    className={`rounded-xl border px-3 py-3.5 text-left transition ${
+                      isSelected
+                        ? "border-sky-500 bg-sky-50 ring-2 ring-sky-200"
+                        : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
+                    }`}
+                  >
+                    <p className="truncate text-sm font-bold text-slate-800">{t.name}</p>
+                    <p
+                      className={`mt-1 text-xs font-semibold ${
+                        busy ? "text-amber-600" : "text-slate-400"
+                      }`}
+                    >
+                      {busy ? "MEŞGUL" : "BOŞ"}
+                    </p>
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
 
-        {error && <p className="px-6 text-sm text-red-600">{error}</p>}
+        {error && <p className="px-6 pb-2 text-sm text-red-600">{error}</p>}
 
-        <div className="flex gap-3 border-t border-slate-100 px-6 py-4">
-          <button type="button" className="btn-ghost flex-1" onClick={onClose} disabled={pending}>
-            İptal
-          </button>
+        <div className="px-6 py-5">
           <button
             type="button"
-            className="btn-primary flex-1"
+            className="w-full rounded-xl bg-sky-500 px-4 py-3.5 text-sm font-bold uppercase tracking-wide text-white transition hover:bg-sky-600 disabled:opacity-60"
             onClick={() => selected && onConfirm(selected)}
             disabled={pending || !selected}
           >
-            {pending ? "Taşınıyor..." : "Taşı"}
+            {pending ? "Aktarılıyor..." : "Aktarımı Tamamla"}
+          </button>
+          <button
+            type="button"
+            className="mt-3 w-full text-center text-sm font-medium text-slate-400 hover:text-slate-600"
+            onClick={onClose}
+            disabled={pending}
+          >
+            Vazgeç
           </button>
         </div>
       </div>
@@ -515,10 +858,12 @@ export default function TableDetail() {
   const [paymentError, setPaymentError] = useState("");
   const [moveError, setMoveError] = useState("");
   const [savedNotice, setSavedNotice] = useState(false);
-  const [savedSubtotal, setSavedSubtotal] = useState(0);
-  const [savedSnapshot, setSavedSnapshot] = useState<SavedSnapshot>([]);
   const [tabSavedOnce, setTabSavedOnce] = useState(false);
   const [showCancel, setShowCancel] = useState(false);
+  const [draftItems, setDraftItems] = useState<DraftItem[]>([]);
+  const [editingSavedItem, setEditingSavedItem] = useState<{ itemId: number; quantity: number } | null>(
+    null
+  );
 
   const table = useQuery({
     queryKey: ["table", tableId],
@@ -547,40 +892,155 @@ export default function TableDetail() {
     queryClient.invalidateQueries({ queryKey: ["tables", "stats"] });
   }
 
-  const addItem = useMutation({
-    mutationFn: async (productId: number) =>
-      (await api.post<CafeTable>(`/tables/${tableId}/items`, { productId })).data,
-    onSuccess: refresh,
+  const saveDraft = useMutation({
+    mutationFn: async (drafts: DraftItem[]) => {
+      for (const item of drafts) {
+        await api.post(`/tables/${tableId}/items`, {
+          productId: item.productId,
+          quantity: item.quantity,
+        });
+      }
+      return (await api.get<CafeTable>(`/tables/${tableId}`)).data;
+    },
+    onSuccess: (data) => {
+      if (data.openTab?.items?.length) {
+        setTabSavedOnce(true);
+      }
+      setDraftItems([]);
+      setSavedNotice(true);
+      refresh();
+    },
   });
 
   const updateItem = useMutation({
     mutationFn: async ({ itemId, quantity }: { itemId: number; quantity: number }) =>
       (await api.patch<CafeTable>(`/tables/${tableId}/items/${itemId}`, { quantity })).data,
-    onSuccess: refresh,
+    onSuccess: () => {
+      setEditingSavedItem(null);
+      refresh();
+    },
   });
 
   const removeItem = useMutation({
     mutationFn: async (itemId: number) =>
       (await api.delete<CafeTable>(`/tables/${tableId}/items/${itemId}`)).data,
-    onSuccess: refresh,
+    onSuccess: (_data, itemId) => {
+      setEditingSavedItem((current) => (current?.itemId === itemId ? null : current));
+      refresh();
+    },
   });
 
   const openTab = table.data?.openTab ?? null;
-  const items = openTab?.items ?? [];
-  const hasItems = items.length > 0;
-  const subtotal = openTab?.total ?? 0;
+  const savedServerItems = openTab?.items ?? [];
+  const hasSavedItems = savedServerItems.length > 0;
+  const hasDraft = draftItems.length > 0;
+  const hasItems = hasSavedItems || hasDraft;
   const paid = openTab?.paidAmount ?? 0;
-  const remaining = Math.max(0, subtotal - paid);
-  const tabLabel = openTab && hasItems ? `#${openTab.id}` : "#Yeni";
+
+  const productById = useMemo(() => {
+    const map = new Map<number, Product>();
+    for (const product of products.data ?? []) {
+      map.set(product.id, product);
+    }
+    return map;
+  }, [products.data]);
+
+  const draftDisplayItems = useMemo(
+    () => draftItems.map((draft) => draftToTabItem(draft, productById.get(draft.productId))),
+    [draftItems, productById]
+  );
+
+  const draftSubtotal = useMemo(
+    () => draftDisplayItems.reduce((sum, item) => sum + item.lineTotal, 0),
+    [draftDisplayItems]
+  );
+
+  const savedSubtotalAmount = openTab?.total ?? 0;
+  const subtotal = savedSubtotalAmount + draftSubtotal;
+  // Parçalı ödemede ödenen ürünler adisyondan düşülür; kalan = mevcut ürün toplamı
+  const remaining = Math.max(0, subtotal);
+  const paymentRemaining = Math.max(0, savedSubtotalAmount);
+  const tabLabel = openTab && hasSavedItems ? `#${openTab.id}` : "#Yeni";
+
+  const addToDraft = useCallback((productId: number) => {
+    setDraftItems((prev) => {
+      const existing = prev.find((item) => item.productId === productId);
+      if (existing) {
+        return prev.map((item) =>
+          item.productId === productId ? { ...item, quantity: item.quantity + 1 } : item
+        );
+      }
+      return [...prev, { productId, quantity: 1 }];
+    });
+  }, []);
+
+  const updateDraftQty = useCallback((productId: number, quantity: number) => {
+    setDraftItems((prev) => {
+      if (quantity <= 0) return prev.filter((item) => item.productId !== productId);
+      return prev.map((item) => (item.productId === productId ? { ...item, quantity } : item));
+    });
+  }, []);
+
+  useEffect(() => {
+    setDraftItems([]);
+    setEditingSavedItem(null);
+  }, [tableId]);
+
+  function getEditingDisplayItem(item: TabItem): TabItem {
+    if (editingSavedItem?.itemId !== item.id) return item;
+    const quantity = editingSavedItem.quantity;
+    return {
+      ...item,
+      quantity,
+      lineTotal: Number((item.unitPrice * quantity).toFixed(2)),
+    };
+  }
+
+  function startEditingSavedItem(item: TabItem) {
+    setEditingSavedItem({ itemId: item.id, quantity: item.quantity });
+  }
+
+  function adjustEditingSavedQty(itemId: number, delta: number) {
+    setEditingSavedItem((prev) => {
+      if (!prev || prev.itemId !== itemId) return prev;
+      return { ...prev, quantity: Math.max(1, prev.quantity + delta) };
+    });
+  }
+
+  function saveEditedSavedItem(item: TabItem) {
+    if (!editingSavedItem || editingSavedItem.itemId !== item.id) return;
+    if (editingSavedItem.quantity === item.quantity) {
+      setEditingSavedItem(null);
+      return;
+    }
+    updateItem.mutate({ itemId: item.id, quantity: editingSavedItem.quantity });
+  }
 
   const pay = useMutation({
-    mutationFn: async ({ method, amount }: { method: PaymentMethod; amount: number }) =>
-      (await api.post<CafeTable>(`/tables/${tableId}/payment`, { method, amount })).data,
-    onSuccess: () => {
+    mutationFn: async ({
+      method,
+      amount,
+      items,
+    }: {
+      method: PaymentMethod;
+      amount: number;
+      items: { itemId: number; quantity: number }[];
+    }) =>
+      (
+        await api.post<CafeTable>(`/tables/${tableId}/payment`, {
+          method,
+          amount,
+          items,
+        })
+      ).data,
+    onSuccess: (data) => {
       setShowPayment(false);
       setPaymentError("");
       refresh();
-      navigate("/masalar");
+      const leftover = data.openTab?.items?.length ?? 0;
+      if (leftover === 0) {
+        navigate("/masalar");
+      }
     },
     onError: (err) => setPaymentError(apiError(err, "Ödeme alınamadı")),
   });
@@ -625,43 +1085,28 @@ export default function TableDetail() {
 
     const tab = table.data.openTab;
     if (tab && (tab.items?.length ?? 0) > 0) {
-      setSavedSnapshot(tab.items!.map((i) => ({ productId: i.productId, quantity: i.quantity })));
-      setSavedSubtotal(tab.total);
       setTabSavedOnce(true);
     } else {
-      setSavedSubtotal(0);
-      setSavedSnapshot([]);
       setTabSavedOnce(false);
     }
   }, [table.data]);
 
   useEffect(() => {
     if (table.data?.openTab) return;
-    setSavedSubtotal(0);
-    setSavedSnapshot([]);
     setTabSavedOnce(false);
+    setDraftItems([]);
   }, [table.data?.openTab?.id]);
-
-  const { saved: savedItems, unsaved: unsavedItems } = useMemo(
-    () => splitItems(items, tabSavedOnce ? savedSnapshot : []),
-    [items, savedSnapshot, tabSavedOnce]
-  );
 
   const cartQtyByProduct = useMemo(() => {
     const map = new Map<number, number>();
-    for (const item of unsavedItems) {
+    for (const item of draftItems) {
       map.set(item.productId, item.quantity);
     }
     return map;
-  }, [unsavedItems]);
+  }, [draftItems]);
 
-  const hasUnsaved = useMemo(
-    () => hasUnsavedChanges(items, savedSnapshot, tabSavedOnce),
-    [items, savedSnapshot, tabSavedOnce]
-  );
-
-  const araAmount = tabSavedOnce ? savedSubtotal : 0;
-  const newAmount = Math.max(0, subtotal - araAmount);
+  const araAmount = tabSavedOnce ? savedSubtotalAmount + paid : paid;
+  const newAmount = draftSubtotal;
 
   const activeProducts = useMemo(
     () => (products.data ?? []).filter((p) => p.active),
@@ -709,22 +1154,20 @@ export default function TableDetail() {
   }
 
   const pending =
-    addItem.isPending ||
-    updateItem.isPending ||
-    removeItem.isPending ||
     pay.isPending ||
     moveTab.isPending ||
-    cancelTab.isPending;
+    cancelTab.isPending ||
+    saveDraft.isPending ||
+    updateItem.isPending ||
+    removeItem.isPending;
 
   function handleSave() {
-    setSavedSnapshot(items.map((i) => ({ productId: i.productId, quantity: i.quantity })));
-    setSavedSubtotal(subtotal);
-    setTabSavedOnce(true);
-    setSavedNotice(true);
+    if (draftItems.length === 0) return;
+    saveDraft.mutate(draftItems);
   }
 
   function handlePrint() {
-    printTabReceipt(table.data!.name, tabLabel, items, subtotal);
+    printTabReceipt(table.data!.name, tabLabel, savedServerItems, savedSubtotalAmount);
   }
 
   return (
@@ -770,8 +1213,8 @@ export default function TableDetail() {
                   key={product.id}
                   product={product}
                   cartQty={cartQtyByProduct.get(product.id) ?? 0}
-                  pending={addItem.isPending}
-                  onAdd={() => addItem.mutate(product.id)}
+                  pending={saveDraft.isPending}
+                  onAdd={() => addToDraft(product.id)}
                 />
               ))}
             </div>
@@ -794,13 +1237,13 @@ export default function TableDetail() {
           </h2>
           <span
             className={`badge gap-1.5 ${
-              hasItems ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"
+              hasSavedItems ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"
             }`}
           >
             <span
-              className={`h-1.5 w-1.5 rounded-full ${hasItems ? "bg-emerald-500" : "bg-slate-400"}`}
+              className={`h-1.5 w-1.5 rounded-full ${hasSavedItems ? "bg-emerald-500" : "bg-slate-400"}`}
             />
-            {hasItems ? "AÇIK" : "BEKLEYEN"}
+            {hasSavedItems ? "AÇIK" : "BEKLEYEN"}
           </span>
         </div>
 
@@ -815,60 +1258,51 @@ export default function TableDetail() {
             </div>
           ) : (
             <div className="p-4">
-              {!tabSavedOnce ? (
-                <>
+              {hasDraft && (
+                <div className={tabSavedOnce && hasSavedItems ? "mb-5" : ""}>
                   <SectionHeader label="Yeni Ürünler" tone="new" />
                   <div className="space-y-2">
-                    {items.map((item) => (
+                    {draftDisplayItems.map((item) => (
                       <OrderItemRow
-                        key={item.id}
+                        key={`draft-${item.productId}`}
                         item={item}
                         pending={pending}
-                        onDecrease={() =>
-                          updateItem.mutate({ itemId: item.id, quantity: item.quantity - 1 })
-                        }
-                        onIncrease={() =>
-                          updateItem.mutate({ itemId: item.id, quantity: item.quantity + 1 })
-                        }
+                        onDecrease={() => updateDraftQty(item.productId, item.quantity - 1)}
+                        onIncrease={() => updateDraftQty(item.productId, item.quantity + 1)}
+                        onRemove={() => updateDraftQty(item.productId, 0)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+              {tabSavedOnce && hasSavedItems && (
+                <div>
+                  <SectionHeader label="Eklenen Ürünler" tone="saved" />
+                  <div className="space-y-2">
+                    {savedServerItems.map((item) => (
+                      <SavedItemRow
+                        key={`saved-${item.id}`}
+                        item={item}
+                        editingItem={getEditingDisplayItem(item)}
+                        pending={pending}
+                        isEditing={editingSavedItem?.itemId === item.id}
+                        onEdit={() => startEditingSavedItem(item)}
+                        onSave={() => saveEditedSavedItem(item)}
+                        onDecrease={() => adjustEditingSavedQty(item.id, -1)}
+                        onIncrease={() => adjustEditingSavedQty(item.id, 1)}
                         onRemove={() => removeItem.mutate(item.id)}
                       />
                     ))}
                   </div>
-                </>
-              ) : (
-                <>
-                  {savedItems.length > 0 && (
-                    <div className={unsavedItems.length > 0 ? "mb-5" : ""}>
-                      <SectionHeader label="Eklenen Ürünler" tone="saved" />
-                      <div className="space-y-2">
-                        {savedItems.map((item) => (
-                          <SavedItemRow key={`saved-${item.id}`} item={item} />
-                        ))}
-                      </div>
+                  {paid > 0 && (
+                    <div className="mt-3 flex items-center gap-2 rounded-xl bg-emerald-50 px-3 py-2.5 text-sm font-semibold text-emerald-700">
+                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white">
+                        <Icon name="check" className="h-3.5 w-3.5" />
+                      </span>
+                      <span>{formatCurrency(paid)} tutarında ödeme alındı</span>
                     </div>
                   )}
-                  {unsavedItems.length > 0 && (
-                    <>
-                      <SectionHeader label="Yeni Ürünler" tone="new" />
-                      <div className="space-y-2">
-                        {unsavedItems.map((item) => (
-                          <OrderItemRow
-                            key={`new-${item.id}`}
-                            item={item}
-                            pending={pending}
-                            onDecrease={() =>
-                              updateItem.mutate({ itemId: item.id, quantity: item.quantity - 1 })
-                            }
-                            onIncrease={() =>
-                              updateItem.mutate({ itemId: item.id, quantity: item.quantity + 1 })
-                            }
-                            onRemove={() => removeItem.mutate(item.id)}
-                          />
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </>
+                </div>
               )}
             </div>
           )}
@@ -892,7 +1326,7 @@ export default function TableDetail() {
                 value={formatCurrency(remaining)}
                 valueClass="text-brand-700"
               />
-              {hasItems && newAmount > 0 && (
+              {hasDraft && newAmount > 0 && (
                 <>
                   <span className="hidden text-slate-300 sm:inline">|</span>
                   <SummaryLine
@@ -915,11 +1349,11 @@ export default function TableDetail() {
             <button
               type="button"
               className={`btn gap-1 px-2 text-xs ${
-                hasItems && hasUnsaved
+                hasDraft
                   ? "border-emerald-500 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
                   : "btn-ghost text-slate-400"
               }`}
-              disabled={!hasItems || pending || !hasUnsaved}
+              disabled={!hasDraft || pending}
               onClick={handleSave}
             >
               <Icon name="check" className="h-4 w-4" />
@@ -927,8 +1361,12 @@ export default function TableDetail() {
             </button>
             <button
               type="button"
-              className="btn-ghost gap-1 px-2 text-xs text-slate-400"
-              disabled={!hasItems || pending}
+              className={`btn gap-1 px-2 text-xs ${
+                hasSavedItems && !hasDraft && !pending
+                  ? "border-sky-400 bg-sky-50 text-sky-700 hover:bg-sky-100"
+                  : "btn-ghost text-slate-400"
+              }`}
+              disabled={!hasSavedItems || pending || hasDraft}
               onClick={() => {
                 setMoveError("");
                 setShowMove(true);
@@ -939,8 +1377,12 @@ export default function TableDetail() {
             </button>
             <button
               type="button"
-              className="btn-ghost gap-1 px-2 text-xs text-slate-400"
-              disabled={!hasItems || pending}
+              className={`btn gap-1 px-2 text-xs ${
+                hasSavedItems && !hasDraft && !pending
+                  ? "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                  : "btn-ghost text-slate-400"
+              }`}
+              disabled={!hasSavedItems || pending || hasDraft}
               onClick={handlePrint}
             >
               <Icon name="printer" className="h-4 w-4" />
@@ -951,7 +1393,7 @@ export default function TableDetail() {
           <button
             type="button"
             className="btn-primary mt-3 w-full gap-2 py-3 text-sm font-semibold"
-            disabled={!hasItems || pending || remaining <= 0}
+            disabled={!hasSavedItems || pending || hasDraft || paymentRemaining <= 0}
             onClick={() => {
               setPaymentError("");
               setShowPayment(true);
@@ -961,7 +1403,7 @@ export default function TableDetail() {
             ÖDEME AL
           </button>
 
-          {tabSavedOnce && hasItems && (
+          {tabSavedOnce && hasSavedItems && (
             <button
               type="button"
               className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-red-200 bg-white py-3 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:opacity-60"
@@ -976,9 +1418,9 @@ export default function TableDetail() {
       </aside>
 
       {showPayment && (
-        <PaymentModal
-          tableName={table.data.name}
-          amount={remaining}
+        <PaymentDrawer
+          items={savedServerItems}
+          remaining={paymentRemaining}
           pending={pay.isPending}
           error={paymentError}
           onClose={() => {
@@ -987,7 +1429,7 @@ export default function TableDetail() {
               setPaymentError("");
             }
           }}
-          onConfirm={(method) => pay.mutate({ method, amount: remaining })}
+          onConfirm={(method, amount, items) => pay.mutate({ method, amount, items })}
         />
       )}
 

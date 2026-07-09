@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
@@ -74,19 +74,20 @@ function FilterPill({
 
 function TableCardMenu({
   table,
+  tone,
   onEdit,
-  onTogglePassive,
-  onDelete,
-  tone = "default",
+  onDeleteTable,
+  onCancelTab,
 }: {
   table: CafeTable;
+  tone: "default" | "occupied";
   onEdit: () => void;
-  onTogglePassive: () => void;
-  onDelete: () => void;
-  tone?: "default" | "occupied";
+  onDeleteTable: () => void;
+  onCancelTab: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const hasOpenTab = !!table.openTab;
 
   useEffect(() => {
     if (!open) return;
@@ -97,24 +98,23 @@ function TableCardMenu({
     return () => document.removeEventListener("mousedown", close);
   }, [open]);
 
-  const hasOpenTab = !!table.openTab;
+  const iconTone =
+    tone === "occupied"
+      ? "text-brand-400 hover:bg-brand-100/80 hover:text-brand-600"
+      : "text-slate-400 hover:bg-slate-100 hover:text-slate-600";
 
   return (
     <div ref={ref} className="relative">
       <button
         type="button"
-        className={
-          tone === "occupied"
-            ? "rounded-lg p-1 text-brand-400 hover:bg-brand-100/80 hover:text-brand-600"
-            : "rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-        }
+        className={`rounded-lg p-1 ${iconTone}`}
         onClick={() => setOpen((v) => !v)}
         aria-label="Masa menüsü"
       >
-        <Icon name="more" className="h-4 w-4" />
+        <Icon name="pencil" className="h-4 w-4" />
       </button>
       {open && (
-        <div className="absolute right-0 top-8 z-20 min-w-[160px] rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+        <div className="absolute right-0 top-8 z-20 min-w-[168px] rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
           <button
             type="button"
             className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
@@ -126,26 +126,17 @@ function TableCardMenu({
             <Icon name="pencil" className="h-4 w-4 text-slate-400" />
             Düzenle
           </button>
-          {!hasOpenTab && table.status !== "DOLU" && (
+          {hasOpenTab && (
             <button
               type="button"
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-orange-600 hover:bg-orange-50"
               onClick={() => {
                 setOpen(false);
-                onTogglePassive();
+                onCancelTab();
               }}
             >
-              {table.status === "PASIF" ? (
-                <>
-                  <Icon name="check" className="h-4 w-4 text-emerald-500" />
-                  Aktif yap
-                </>
-              ) : (
-                <>
-                  <Icon name="eyeOff" className="h-4 w-4 text-slate-400" />
-                  Pasif yap
-                </>
-              )}
+              <Icon name="close" className="h-4 w-4" />
+              İptal
             </button>
           )}
           {!hasOpenTab && (
@@ -154,7 +145,7 @@ function TableCardMenu({
               className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
               onClick={() => {
                 setOpen(false);
-                onDelete();
+                onDeleteTable();
               }}
             >
               <Icon name="trash" className="h-4 w-4" />
@@ -163,6 +154,51 @@ function TableCardMenu({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function TableCardActions({
+  table,
+  tone,
+  onEdit,
+  onDeleteTable,
+  onCancelTab,
+  onReorderPointerDown,
+}: {
+  table: CafeTable;
+  tone: "default" | "occupied";
+  onEdit: () => void;
+  onDeleteTable: () => void;
+  onCancelTab: () => void;
+  onReorderPointerDown: (e: ReactPointerEvent<HTMLButtonElement>) => void;
+}) {
+  const iconTone =
+    tone === "occupied"
+      ? "text-brand-400 hover:bg-brand-100/80 hover:text-brand-600"
+      : "text-slate-400 hover:bg-slate-100 hover:text-slate-600";
+
+  return (
+    <div
+      className="flex items-center gap-0.5"
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
+    >
+      <button
+        type="button"
+        className={`cursor-grab touch-none rounded-lg p-1 active:cursor-grabbing ${iconTone}`}
+        aria-label="Sıralamak için sürükleyin"
+        onPointerDown={onReorderPointerDown}
+      >
+        <Icon name="drag" className="h-4 w-4" />
+      </button>
+      <TableCardMenu
+        table={table}
+        tone={tone}
+        onEdit={onEdit}
+        onDeleteTable={onDeleteTable}
+        onCancelTab={onCancelTab}
+      />
     </div>
   );
 }
@@ -361,11 +397,70 @@ function TableDrawer({
           <button type="button" className="btn-ghost" onClick={() => requestClose()}>
             İptal
           </button>
-          <button type="submit" className="btn-primary" disabled={save.isPending}>
+          <button type="submit" className="btn-primary gap-2" disabled={save.isPending}>
+            <Icon name="check" className="h-4 w-4" />
             {save.isPending ? "Kaydediliyor..." : "Kaydet"}
           </button>
         </div>
       </form>
+    </div>,
+    document.body
+  );
+}
+
+function CancelTabModal({
+  table,
+  pending,
+  onClose,
+  onConfirm,
+}: {
+  table: CafeTable;
+  pending: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  return createPortal(
+    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/30 p-4">
+      <div className="relative w-full max-w-md rounded-2xl bg-white px-8 py-8 text-center shadow-xl">
+        <button
+          type="button"
+          onClick={onClose}
+          disabled={pending}
+          className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200 disabled:opacity-50"
+          aria-label="Kapat"
+        >
+          <Icon name="close" className="h-4 w-4" />
+        </button>
+
+        <div className="mx-auto mb-5 flex h-12 w-12 items-center justify-center rounded-xl bg-orange-50 text-orange-600">
+          <Icon name="close" className="h-6 w-6" />
+        </div>
+
+        <h3 className="text-2xl font-bold text-slate-800">Adisyonu İptal</h3>
+        <p className="mx-auto mt-3 max-w-sm text-sm leading-relaxed text-slate-500">
+          <span className="font-semibold text-slate-700">{table.name}</span> masasındaki adisyonu
+          iptal etmek istediğinizden emin misiniz? Masa boşaltılacak ve bu işlem geri alınamaz.
+        </p>
+
+        <div className="mt-8 flex items-center justify-center gap-3">
+          <button
+            type="button"
+            className="btn-ghost min-w-[120px]"
+            onClick={onClose}
+            disabled={pending}
+          >
+            Vazgeç
+          </button>
+          <button
+            type="button"
+            className="btn min-w-[120px] bg-orange-500 text-white hover:bg-orange-600"
+            onClick={onConfirm}
+            disabled={pending}
+          >
+            {pending ? "İptal ediliyor..." : "Evet, İptal Et"}
+          </button>
+        </div>
+      </div>
     </div>,
     document.body
   );
@@ -447,6 +542,12 @@ export default function TableOrder() {
   const [showNew, setShowNew] = useState(false);
   const [editTable, setEditTable] = useState<CafeTable | null>(null);
   const [deleteTableModal, setDeleteTableModal] = useState<CafeTable | null>(null);
+  const [cancelTabModal, setCancelTabModal] = useState<CafeTable | null>(null);
+  const [orderedTables, setOrderedTables] = useState<CafeTable[]>([]);
+  const [draggingId, setDraggingId] = useState<number | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<number | null>(null);
+  const dragSourceRef = useRef<number | null>(null);
+  const dropTargetRef = useRef<number | null>(null);
 
   const tables = useQuery({
     queryKey: ["tables"],
@@ -462,17 +563,95 @@ export default function TableOrder() {
     qc.invalidateQueries({ queryKey: ["tables", "stats"] });
   };
 
-  const updateTable = useMutation({
-    mutationFn: async ({ id, status }: { id: number; status: TableStatus }) =>
-      (await api.put(`/tables/${id}`, { status })).data,
+  useEffect(() => {
+    if (tables.data) setOrderedTables(tables.data);
+  }, [tables.data]);
+
+  const reorderTables = useMutation({
+    mutationFn: async (ids: number[]) => (await api.put<CafeTable[]>("/tables/reorder", { ids })).data,
     onSuccess: refresh,
   });
+  const reorderMutateRef = useRef(reorderTables.mutate);
+  reorderMutateRef.current = reorderTables.mutate;
+
+  const beginReorder = useCallback((id: number, e: ReactPointerEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragSourceRef.current = id;
+    dropTargetRef.current = id;
+    setDraggingId(id);
+    setDropTargetId(id);
+  }, []);
+
+  useEffect(() => {
+    if (draggingId === null) return;
+
+    function findTableId(x: number, y: number): number | null {
+      const el = document.elementFromPoint(x, y)?.closest("[data-table-id]");
+      if (!el) return null;
+      const id = Number((el as HTMLElement).dataset.tableId);
+      return Number.isFinite(id) ? id : null;
+    }
+
+    function onPointerMove(e: PointerEvent) {
+      const targetId = findTableId(e.clientX, e.clientY);
+      if (targetId && targetId !== dropTargetRef.current) {
+        dropTargetRef.current = targetId;
+        setDropTargetId(targetId);
+      }
+    }
+
+    function onPointerUp(e: PointerEvent) {
+      const fromId = dragSourceRef.current;
+      const toId = findTableId(e.clientX, e.clientY) ?? dropTargetRef.current;
+
+      if (fromId !== null && toId !== null && fromId !== toId) {
+        setOrderedTables((prev) => {
+          const fromIdx = prev.findIndex((t) => t.id === fromId);
+          const toIdx = prev.findIndex((t) => t.id === toId);
+          if (fromIdx < 0 || toIdx < 0) return prev;
+          const next = [...prev];
+          const [moved] = next.splice(fromIdx, 1);
+          next.splice(toIdx, 0, moved);
+          reorderMutateRef.current(next.map((t) => t.id));
+          return next;
+        });
+      }
+
+      dragSourceRef.current = null;
+      dropTargetRef.current = null;
+      setDraggingId(null);
+      setDropTargetId(null);
+    }
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    document.body.style.cursor = "grabbing";
+    document.body.style.userSelect = "none";
+
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }, [draggingId]);
 
   const deleteTable = useMutation({
     mutationFn: async (id: number) => (await api.delete(`/tables/${id}`)).data,
     onSuccess: () => {
       refresh();
       setDeleteTableModal(null);
+      setEditTable(null);
+    },
+  });
+
+  const cancelTab = useMutation({
+    mutationFn: async (id: number) => (await api.post(`/tables/${id}/cancel`)).data,
+    onSuccess: () => {
+      refresh();
+      setCancelTabModal(null);
+      setEditTable(null);
     },
   });
 
@@ -480,12 +659,12 @@ export default function TableOrder() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLocaleLowerCase("tr");
-    return (tables.data ?? []).filter((t) => {
+    return orderedTables.filter((t) => {
       if (filter !== "all" && t.status !== filter) return false;
       if (!q) return true;
       return t.name.toLocaleLowerCase("tr").includes(q);
     });
-  }, [tables.data, search, filter]);
+  }, [orderedTables, search, filter]);
 
   return (
     <div className="space-y-5">
@@ -581,9 +760,11 @@ export default function TableOrder() {
               return (
                 <div
                   key={table.id}
+                  data-table-id={table.id}
                   role="button"
                   tabIndex={table.status === "PASIF" ? -1 : 0}
                   onClick={() => {
+                    if (draggingId !== null) return;
                     if (table.status !== "PASIF") navigate(`/masalar/${table.id}`);
                   }}
                   onKeyDown={(e) => {
@@ -595,7 +776,13 @@ export default function TableOrder() {
                     isOccupied
                       ? "border-brand-200 bg-brand-50/80 hover:border-brand-300 hover:shadow-md"
                       : "border-slate-200 bg-white hover:border-slate-300 hover:shadow-md"
-                  } ${table.status === "PASIF" ? "cursor-not-allowed opacity-80" : "cursor-pointer"}`}
+                  } ${table.status === "PASIF" ? "cursor-not-allowed opacity-80" : "cursor-pointer"} ${
+                    draggingId === table.id ? "scale-[0.98] opacity-40" : ""
+                  } ${
+                    dropTargetId === table.id && draggingId !== null && draggingId !== table.id
+                      ? "ring-2 ring-brand-500 ring-offset-2"
+                      : ""
+                  }`}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <span className={`badge gap-1.5 ${badge.className}`}>
@@ -607,20 +794,14 @@ export default function TableOrder() {
                       )}
                       {badge.label}
                     </span>
-                    <div onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-                      <TableCardMenu
-                        table={table}
-                        tone={isOccupied ? "occupied" : "default"}
-                        onEdit={() => setEditTable(table)}
-                        onTogglePassive={() =>
-                          updateTable.mutate({
-                            id: table.id,
-                            status: table.status === "PASIF" ? "UYGUN" : "PASIF",
-                          })
-                        }
-                        onDelete={() => setDeleteTableModal(table)}
-                      />
-                    </div>
+                    <TableCardActions
+                      table={table}
+                      tone={isOccupied ? "occupied" : "default"}
+                      onEdit={() => setEditTable(table)}
+                      onDeleteTable={() => setDeleteTableModal(table)}
+                      onCancelTab={() => setCancelTabModal(table)}
+                      onReorderPointerDown={(e) => beginReorder(table.id, e)}
+                    />
                   </div>
 
                   <div className="flex flex-1 flex-col items-center justify-center py-2 text-center">
@@ -671,6 +852,14 @@ export default function TableOrder() {
           pending={deleteTable.isPending}
           onClose={() => setDeleteTableModal(null)}
           onConfirm={() => deleteTable.mutate(deleteTableModal.id)}
+        />
+      )}
+      {cancelTabModal && (
+        <CancelTabModal
+          table={cancelTabModal}
+          pending={cancelTab.isPending}
+          onClose={() => setCancelTabModal(null)}
+          onConfirm={() => cancelTab.mutate(cancelTabModal.id)}
         />
       )}
     </div>
